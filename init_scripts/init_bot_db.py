@@ -93,11 +93,6 @@ def finditems(obj, key):
 def main(config: DictConfig) -> None:
     init_admin_db(config)
 
-    docstore_cfgs = finditems(config, "docstore")
-    for cfg in docstore_cfgs:
-        if cfg["_target_"] == "crag.storage.PGSQLDocStore":
-            init_pgsql_docstore(cfg)
-
 
 if __name__ == "__main__":
     main()

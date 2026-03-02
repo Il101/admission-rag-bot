@@ -1,6 +1,5 @@
 from typing import Callable, List
 
-from langchain_core.documents import Document
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import Update
@@ -9,8 +8,7 @@ from telegram.ext import ContextTypes
 from bot.db import Admin, BannedUserOrChat
 from bot.decorators import admin_only, with_db_session
 from bot.utils import remove_bot_command
-from crag.knowledge.transformations.sequence import TransformationSequence
-from crag.retrievers.base import PipelineRetrieverBase
+from crag.simple_rag import Document
 
 
 @with_db_session()
@@ -18,8 +16,7 @@ from crag.retrievers.base import PipelineRetrieverBase
 async def add_fact(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    pipe_retriever: PipelineRetrieverBase,
-    doc_transformator: TransformationSequence,
+    simple_rag,
     **kwargs,
 ):
     info = remove_bot_command(update.effective_message.text, "add", context.bot.name)
@@ -48,8 +45,7 @@ async def add_fact(
             "title": title,
         },
     )
-    prepared_docs = doc_transformator.apply([doc])
-    ids = await pipe_retriever.aadd_documents(prepared_docs)
+    ids = await simple_rag.aadd_documents([doc])
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -63,8 +59,7 @@ async def add_fact(
 async def add_fact_from_replied(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    pipe_retriever: PipelineRetrieverBase,
-    doc_transformator: TransformationSequence,
+    simple_rag,
     **kwargs,
 ):
     info = remove_bot_command(
@@ -97,8 +92,7 @@ async def add_fact_from_replied(
             "title": title,
         },
     )
-    prepared_docs = doc_transformator.apply([doc])
-    ids = await pipe_retriever.aadd_documents(prepared_docs)
+    ids = await simple_rag.aadd_documents([doc])
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -112,7 +106,7 @@ async def add_fact_from_replied(
 async def delete_fact(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    pipe_retriever: PipelineRetrieverBase,
+    simple_rag,
     **kwargs,
 ):
     if len(context.args) != 1:
@@ -127,7 +121,7 @@ async def delete_fact(
         return
 
     fact_id = context.args[0]
-    success = await pipe_retriever.adelete_documents([fact_id])
+    success = await simple_rag.adelete_documents([fact_id])
 
     if success:
         await context.bot.send_message(
@@ -151,11 +145,12 @@ async def delete_fact(
 async def add_facts_from_link(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    pipe_retriever: PipelineRetrieverBase,
-    url_loader: Callable[[List[str]], List[Document]],
-    doc_transformator: TransformationSequence,
+    simple_rag,
     **kwargs,
 ):
+    # This feature relied on url_loader from LangChain.
+    # Without LangChain, we'll keep the signature but return an error
+    # since we don't have a simple web loader implemented yet.
     if len(context.args) != 1:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -164,15 +159,10 @@ async def add_facts_from_link(
         )
         return
 
-    url = context.args[0]
-    docs = url_loader([url])
-    docs = doc_transformator.apply(docs)
-    ids = await pipe_retriever.aadd_documents(docs)
-
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         reply_to_message_id=update.effective_message.id,
-        text=f"Информация успешно добавлена в базу знаний с id: {ids}",
+        text="Функция загрузки по ссылке временно отключена для экономии оперативной памяти.",
     )
 
 

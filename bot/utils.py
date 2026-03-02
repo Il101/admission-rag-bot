@@ -1,7 +1,7 @@
 import re
 from typing import List
 
-from langchain_core.documents import Document
+from crag.simple_rag import Document
 
 # Tags that Telegram's HTML ParseMode actually supports
 _TG_ALLOWED_TAGS = frozenset({
@@ -56,11 +56,11 @@ def make_html_quote(text: str) -> str:
 
 
 def tg_message_to_source_str(doc: Document) -> str:
-    author = doc.metadata["author"]
-    title = doc.metadata["title"]
+    author = doc.metadata.get("author", "Ассистент")
+    title = doc.metadata.get("title", doc.metadata.get("source", "Документ"))
 
-    if doc.metadata["is_public"]:
-        link = doc.metadata["source"]
+    if doc.metadata.get("is_public"):
+        link = doc.metadata.get("source", "")
         link_str = make_html_link(link, title)
         return f"{link_str} от {author}"
     else:
@@ -69,8 +69,8 @@ def tg_message_to_source_str(doc: Document) -> str:
 
 
 def web_doc_to_source_str(doc: Document) -> str:
-    title = doc.metadata["title"]
-    link = doc.metadata["source"]
+    title = doc.metadata.get("title", doc.metadata.get("source", "Документ"))
+    link = doc.metadata.get("source", "")
     return make_html_link(link, title)
 
 

@@ -15,25 +15,13 @@ psycopg-pool==3.2.2
 pgvector==0.2.5
 
 # RAG & AI Orchestration
-langchain==0.2.12
-langchain-community==0.2.10
-langchain-core==0.2.29
-langgraph==0.1.19
-langsmith==0.1.96
-langchain-text-splitters==0.2.2
 
 # Search & Vector Stores
-elasticsearch==8.14.0
-langchain-elasticsearch==0.2.2
-langchain-postgres==0.0.9
 
 # Cloud LLM Adapters
-langchain-openai==0.1.21
-langchain-google-genai
 google-genai
 openai==1.40.3
 tiktoken==0.7.0
-
 # Document Parsing
 beautifulsoup4==4.12.3
 lxml==5.2.2

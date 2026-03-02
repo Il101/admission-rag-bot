@@ -1,15 +1,11 @@
 import logging
 import os
 from functools import partial
-from typing import Callable, List
 
 import bot.env
 import hydra
-from hydra.core.hydra_config import HydraConfig
-from hydra.utils import call, instantiate
-from langchain_core.documents import Document
-from langchain_core.runnables import Runnable
 from omegaconf import DictConfig
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from telegram import Update
 from telegram.ext import (
@@ -40,22 +36,21 @@ from bot.handlers.rag import (
 from bot.handlers.service import error, help_command, ignore, reaction, unknown, delete_data
 from bot.handlers.onboarding import build_onboarding_handler
 from bot.handlers.suggested import build_suggested_handler
-from crag.knowledge.transformations.sequence import TransformationSequence
-from crag.retrievers.base import PipelineRetrieverBase
+from crag.simple_rag import SimpleRAG
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
 
-def prepare_rag_based_handlers(graph: Runnable, rag_chain, llm, db_session: sessionmaker):
-    answer_with_graph = partial(answer, graph=graph, rag_chain=rag_chain, llm=llm, db_session=db_session)
+def prepare_rag_based_handlers(simple_rag: SimpleRAG, db_session: sessionmaker):
+    answer_with_graph = partial(answer, simple_rag=simple_rag, db_session=db_session)
     answer_to_replied_with_graph = partial(
-        answer_to_replied, graph=graph, rag_chain=rag_chain, llm=llm, db_session=db_session
+        answer_to_replied, simple_rag=simple_rag, db_session=db_session
     )
-    retieve_docs_with_graph = partial(retieve_docs, graph=graph, db_session=db_session)
+    retieve_docs_with_graph = partial(retieve_docs, simple_rag=simple_rag, db_session=db_session)
     retieve_docs_to_replied_with_graph = partial(
-        retieve_docs_to_replied, graph=graph, db_session=db_session
+        retieve_docs_to_replied, simple_rag=simple_rag, db_session=db_session
     )
 
     return {
@@ -67,33 +62,27 @@ def prepare_rag_based_handlers(graph: Runnable, rag_chain, llm, db_session: sess
 
 
 def prepare_management_handlers(
-    pipe_retriever: PipelineRetrieverBase,
+    simple_rag: SimpleRAG,
     db_session: sessionmaker,
-    url_loader: Callable[[List[str]], List[Document]],
-    doc_transformator: TransformationSequence,
 ):
     handlers = {}
     handlers["add_fact"] = partial(
         add_fact,
-        pipe_retriever=pipe_retriever,
+        simple_rag=simple_rag,
         db_session=db_session,
-        doc_transformator=doc_transformator,
     )
     handlers["add_fact_from_replied"] = partial(
         add_fact_from_replied,
-        pipe_retriever=pipe_retriever,
+        simple_rag=simple_rag,
         db_session=db_session,
-        doc_transformator=doc_transformator,
     )
     handlers["add_facts_from_link"] = partial(
         add_facts_from_link,
-        pipe_retriever=pipe_retriever,
+        simple_rag=simple_rag,
         db_session=db_session,
-        url_loader=url_loader,
-        doc_transformator=doc_transformator,
     )
     handlers["delete_fact"] = partial(
-        delete_fact, pipe_retriever=pipe_retriever, db_session=db_session
+        delete_fact, simple_rag=simple_rag, db_session=db_session
     )
     handlers["ban_user"] = partial(ban_user, db_session=db_session)
     handlers["unban_user"] = partial(unban_user, db_session=db_session)
@@ -103,16 +92,29 @@ def prepare_management_handlers(
 
 
 def prepare_handlers(config: DictConfig):
-    db_session = get_db_sessionmaker(config["bot_db_connection"])
-    pipeline = instantiate(config["pipeline"])
-    url_loader = call(config["knowledge"]["loader"])
-    doc_transformator = call(config["knowledge"]["transform"])
+    # Parse DB connection template
+    db_url_template = config.bot_db_connection
+    db_url = db_url_template.replace("${oc.env:POSTGRES_USER}", os.environ.get("POSTGRES_USER", "")) \
+                            .replace("${oc.env:POSTGRES_PASSWORD}", os.environ.get("POSTGRES_PASSWORD", "")) \
+                            .replace("${oc.env:POSTGRES_HOST}", os.environ.get("POSTGRES_HOST", "")) \
+                            .replace("${oc.env:POSTGRES_DB}", os.environ.get("POSTGRES_DB", ""))
+                            
+    db_session = get_db_sessionmaker(db_url)
+    
+    # Sync engine for retrieve logic
+    sync_db_url = db_url.replace("+asyncpg", "+psycopg") if "+asyncpg" in db_url else db_url
+    if sync_db_url.startswith("postgresql://"):
+        sync_db_url = sync_db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    
+    db_engine = create_engine(sync_db_url)
 
-    rag_handlers = prepare_rag_based_handlers(pipeline.graph, pipeline.rag_chain, pipeline.llm, db_session)
-    manag_handlers = prepare_management_handlers(
-        pipeline.pipe_retriever, db_session, url_loader, doc_transformator
-    )
-    suggested_handler = build_suggested_handler(pipeline.graph, pipeline.rag_chain, pipeline.llm, db_session)
+    # Instantiate our custom simple RAG
+    # We still read the LLM templates from Hydra config for backward compatibility
+    simple_rag = SimpleRAG(db_engine, config.get("prompts"))
+
+    rag_handlers = prepare_rag_based_handlers(simple_rag, db_session)
+    manag_handlers = prepare_management_handlers(simple_rag, db_session)
+    suggested_handler = build_suggested_handler(simple_rag, db_session)
 
     return rag_handlers, manag_handlers, db_session, suggested_handler
 

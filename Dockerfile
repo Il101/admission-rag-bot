@@ -1,30 +1,41 @@
-FROM python:3.11-slim
+# Stage 1: Build stage
+FROM python:3.11-slim AS builder
 
-# Keeps Python from generating .pyc files in the container
 ENV PYTHONDONTWRITEBYTECODE=1
-
-# Turns off buffering for easier container logging
 ENV PYTHONUNBUFFERED=1
 
-# Install building dependencies
-RUN apt-get update && apt-get install -y \
+RUN set -ex \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
     gcc \
     python3-dev \
     build-essential \
-    && apt-get clean \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-# Install requirements
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.txt
 
-# Copy and install the application
+# Stage 2: Final runtime stage
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install runtime libraries
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy wheels from builder and install
+COPY --from=builder /app/wheels /wheels
+COPY --from=builder /app/requirements.txt .
+RUN pip install --no-cache /wheels/*
+
 COPY . /app
 RUN pip install --no-cache-dir .
 
-# Create a non-root user
 RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
 USER appuser
 

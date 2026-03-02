@@ -1,31 +1,57 @@
 import asyncio
 import logging
-import bot.env
 import os
-import hydra
-from hydra.utils import call, instantiate
-from omegaconf import DictConfig
 import hashlib
+import yaml
+import json
+from pathlib import Path
 from sqlalchemy import create_engine, text
+from google import genai
+from google.genai import types
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@hydra.main(version_base="1.3", config_path="../configs", config_name="default")
-def main(config: DictConfig) -> None:
-    asyncio.run(index(config))
+def split_text(text_content: str, max_length: int = 500) -> list[str]:
+    """A very simple recursive character splitter equivalent."""
+    paragraphs = text_content.split('\n\n')
+    chunks = []
+    current_chunk = ""
 
-async def index(config: DictConfig) -> None:
-    logger.info("Initializing pipeline and loader...")
-    pipeline = instantiate(config["pipeline"])
-    url_loader = call(config["knowledge"]["loader"])
-    doc_transformator = call(config["knowledge"]["transform"])
+    for p in paragraphs:
+        if len(current_chunk) + len(p) > max_length and current_chunk:
+            chunks.append(current_chunk.strip())
+            current_chunk = p
+        else:
+            current_chunk += "\n\n" + p if current_chunk else p
+            
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    # Further break down giant paragraphs if needed
+    final_chunks = []
+    for c in chunks:
+        if len(c) > max_length * 2:
+            sentences = c.replace('. ', '.\n').split('\n')
+            temp = ""
+            for s in sentences:
+                if len(temp) + len(s) > max_length and temp:
+                    final_chunks.append(temp.strip())
+                    temp = s
+                else:
+                    temp += " " + s if temp else s
+            if temp:
+                final_chunks.append(temp.strip())
+        else:
+            final_chunks.append(c)
+            
+    return final_chunks
+
+async def index():
+    logger.info("Initializing pipeline without LangChain...")
     
-    # --- Global Hash Sync Logic ---
+    # Check knowledge base state
     logger.info("Checking knowledge base state...")
     kb_dir = "knowledge_base"
-    # Collect ALL paths first, then sort globally (not just within each dir)
-    # os.walk() directory order differs between macOS and Linux!
     md_files = []
     for root, dirs, files in os.walk(kb_dir):
         for file in files:
@@ -39,88 +65,104 @@ async def index(config: DictConfig) -> None:
             hashes.append(hashlib.md5(f.read()).hexdigest())
     current_hash = hashlib.md5("".join(hashes).encode()).hexdigest()
 
-    db_url = config["bot_db_connection"]
+    # Get DB URL from yaml
+    with open("configs/default.yaml", "r") as f:
+        config = yaml.safe_load(f)
+        
+    db_url_template = config.get("bot_db_connection")
+    db_url = db_url_template.replace("${oc.env:POSTGRES_USER}", os.environ.get("POSTGRES_USER", "")) \
+                            .replace("${oc.env:POSTGRES_PASSWORD}", os.environ.get("POSTGRES_PASSWORD", "")) \
+                            .replace("${oc.env:POSTGRES_HOST}", os.environ.get("POSTGRES_HOST", "")) \
+                            .replace("${oc.env:POSTGRES_DB}", os.environ.get("POSTGRES_DB", ""))
+
     engine = create_engine(db_url)
     
     with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS kb_sync_state (id INT PRIMARY KEY, hash TEXT)"))
         result = conn.execute(text("SELECT hash FROM kb_sync_state WHERE id = 1")).fetchone()
         old_hash = result[0] if result else None
 
-    if old_hash == current_hash:
-        # We also need to confirm that Elasticsearch actually has the index!
-        # It's possible for the hash to match but ES was restarted/wiped.
-        force_reindex = False
-        try:
-            retrievers = getattr(pipeline.pipe_retriever, "_child_retrievers", [])
-            sparse = retrievers[1] if len(retrievers) > 1 else None
-            if sparse and not sparse.client.indices.exists(index=sparse.index_name):
-                logger.info(f"Elasticsearch index '{sparse.index_name}' is missing! Forcing re-index.")
-                force_reindex = True
-        except Exception as e:
-            logger.warning(f"Could not check ES index existence: {e}")
-            
-        if not force_reindex:
-            logger.info("✅ Knowledge base is unchanged since last deployment. Skipping indexing to save API limits.")
-            return
-
+        # Ensure our target table exists
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS simple_documents (
+                id SERIAL PRIMARY KEY,
+                content TEXT,
+                metadata JSONB,
+                embedding vector
+            )
+        """))
         
-    logger.info("🔄 Knowledge base has changed. Clearing existing indexes and re-indexing...")
-    with engine.connect() as conn:
+        # Check if table has data. Even if hash matches, table might be empty
+        count = conn.execute(text("SELECT count(*) FROM simple_documents")).scalar()
+
+    if old_hash == current_hash and count > 0:
+        logger.info("✅ Knowledge base is unchanged since last deployment. Skipping indexing to save API limits.")
+        return
+
+    logger.info("🔄 Knowledge base has changed or is empty. Clearing existing indexes and re-indexing...")
+    with engine.begin() as conn:
+        # We drop the old langchain payload and our new simple tables
         conn.execute(text("DROP TABLE IF EXISTS langchain_pg_embedding CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS langchain_pg_collection CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS docstore CASCADE"))
-        conn.commit()
-    
-    # Extract retrievers to clear/recreate structures
-    try:
-        # EnsembleRetriever stores children in _child_retrievers
-        retrievers = getattr(pipeline.pipe_retriever, "_child_retrievers", [])
-        if not retrievers:
-            dense = pipeline.pipe_retriever
-            sparse = None
-        else:
-            dense = retrievers[0]
-            sparse = retrievers[1] if len(retrievers) > 1 else None
-        
-        # Recreate docstore schema
-        await dense.docstore.acreate_schema()
-        
-        # Clear Elasticsearch
-        sparse.client.indices.delete(index=sparse.index_name, ignore_unavailable=True)
-    except Exception as e:
-        logger.warning(f"Failed to clear some indexes, proceeding anyway: {e}")
+        conn.execute(text("TRUNCATE TABLE simple_documents RESTART IDENTITY"))
 
-    # --- End Global Hash Sync Logic ---
-    
-    # Load all markdown documents from knowledge_base
+    # Load and chunk markdown
     logger.info("Loading documents from knowledge_base/...")
-    from crag.knowledge.loaders.markdown_loader import load
-    docs = load("knowledge_base")
-    
-    if not docs:
+    all_chunks = []
+    for path in md_files:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            # Simple metadata extraction
+            source = os.path.basename(path)
+            title = source.replace(".md", "").replace("-", " ").title()
+            chunks = split_text(content, max_length=500)
+            for c in chunks:
+                if c.strip():
+                    all_chunks.append({
+                        "content": c,
+                        "metadata": {"source": source, "title": title}
+                    })
+
+    if not all_chunks:
         logger.warning("No documents found in knowledge_base/!")
         return
         
-    logger.info(f"Loaded {len(docs)} documents. Applying transformations...")
-    prepared_docs = doc_transformator.apply(docs)
-    
-    logger.info(f"Adding {len(prepared_docs)} chunks to the vector store and document store in batches...")
+    logger.info(f"Loaded {len(all_chunks)} chunks. Generating embeddings...")
+    client = genai.Client()
     
     batch_size = 100
-    all_ids = []
-    for i in range(0, len(prepared_docs), batch_size):
-        batch = prepared_docs[i : i + batch_size]
+    total_added = 0
+    
+    for i in range(0, len(all_chunks), batch_size):
+        batch = all_chunks[i : i + batch_size]
         logger.info(f"Adding batch {i//batch_size + 1} ({len(batch)} chunks)...")
-        ids = await pipeline.pipe_retriever.aadd_documents(batch)
-        all_ids.extend(ids)
-        if i + batch_size < len(prepared_docs):
+        
+        texts_to_embed = [item["content"] for item in batch]
+        
+        # Google GenAI lets you embed a list of strings
+        response = client.models.embed_content(
+            model='models/gemini-embedding-001',
+            contents=texts_to_embed,
+        )
+        
+        embeddings = [e.values for e in response.embeddings]
+        
+        # Insert into DB
+        with engine.begin() as conn:
+            for item, emb in zip(batch, embeddings):
+                conn.execute(
+                    text("INSERT INTO simple_documents (content, metadata, embedding) VALUES (:c, :m, :e)"), 
+                    {"c": item["content"], "m": json.dumps(item["metadata"]), "e": str(emb)}
+                )
+        total_added += len(batch)
+        
+        if i + batch_size < len(all_chunks):
             logger.info("Sleeping 2s to avoid rate limits...")
             await asyncio.sleep(2)
 
-
-    
-    logger.info(f"Successfully indexed knowledge base. IDs: {len(all_ids)} chunks added.")
+    logger.info(f"Successfully indexed knowledge base. IDs: {total_added} chunks added.")
     
     # Save the new hash state
     with engine.begin() as conn:
@@ -130,4 +172,4 @@ async def index(config: DictConfig) -> None:
         )
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(index())
