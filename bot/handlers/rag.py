@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+import re
 
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
@@ -21,32 +22,58 @@ from crag.simple_rag import documents_to_context_str
 
 logger = logging.getLogger(__name__)
 
-BUTTONS_MARKER = "---BUTTONS---"
-
 # Streaming config
 STREAM_EDIT_INTERVAL = 1.2  # seconds between edits
 STREAM_MIN_CHARS = 80       # min new chars before edit
 
 
 def parse_suggested_buttons(text: str) -> tuple:
-    """Extract suggested questions from the LLM response.
+    """Extract suggested questions from the structured JSON response.
     Returns (clean_text, list_of_questions).
     """
-    if BUTTONS_MARKER not in text:
-        return text, []
-
-    parts = text.rsplit(BUTTONS_MARKER, 1)
-    clean_text = parts[0].rstrip()
-    buttons_raw = parts[1].strip()
+    logger.debug(f"Parsing suggested buttons from: {text[:200]}...")
+    
+    # Try to find a JSON block if it's wrapped in something
+    json_text = text.strip()
+    if "{" in json_text and "}" in json_text:
+        try:
+            start = json_text.find("{")
+            end = json_text.rfind("}") + 1
+            json_text = json_text[start:end]
+        except:
+            pass
 
     try:
-        questions = json.loads(buttons_raw)
-        if isinstance(questions, list) and all(isinstance(q, str) for q in questions):
-            return clean_text, questions
-    except (json.JSONDecodeError, TypeError):
-        pass
+        data = json.loads(json_text)
+        if isinstance(data, dict):
+            answer = data.get("answer", "")
+            suggested = data.get("suggested_questions", [])
+            if isinstance(suggested, list):
+                return answer, suggested
+        return text, []
+    except json.JSONDecodeError:
+        logger.warning(f"Failed to parse JSON from response. Text starts with: {text[:100]}")
+        # Fallback for non-JSON or partial JSON
+        # Try to extract "answer" content
+        ans_match = re.search(r'"answer":\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
+        # Try to extract "suggested_questions" array
+        btns_match = re.search(r'"suggested_questions":\s*(\[[^\]]*\])', text, re.DOTALL)
+        
+        ans = text
+        btns = []
+        
+        if ans_match:
+            ans = ans_match.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+        
+        if btns_match:
+            try:
+                btns = json.loads(btns_match.group(1))
+            except:
+                # Last resort regex for strings in the array
+                btns = re.findall(r'"([^"]*)"', btns_match.group(1))
+        
+        return ans, btns
 
-    return clean_text, []
 
 def _build_chat_history_str(history_list: list) -> str:
     if not history_list:
@@ -84,29 +111,40 @@ async def _stream_answer(
     msg, simple_rag, question: str, context_str: str,
     chat_history: str, memory_context: str, prefix: str = "",
 ):
-    """Stream LLM generation, editing the Telegram message periodically.
-    Returns the full accumulated response text.
+    """Stream LLM generation (JSON format), editing the Telegram message periodically.
+    Returns the full accumulated response JSON text.
     """
     accumulated = prefix
     last_edit_time = time.monotonic()
     last_edit_len = len(prefix)
+
+    # Regex to extract partial answer from a JSON stream: {"answer": "..."}
+    # We look for the "answer" key and capture its content until it closes or stream ends.
+    answer_regex = re.compile(r'"answer":\s*"((?:[^"\\]|\\.)*)', re.DOTALL)
 
     async for chunk in simple_rag.astream_answer(
         question, context_str, chat_history, memory_context, get_current_date()
     ):
         accumulated += chunk
         now = time.monotonic()
-        new_chars = len(accumulated) - last_edit_len
+        
+        # Extract what we have of the answer so far
+        match = answer_regex.search(accumulated)
+        if match:
+            display_text = match.group(1)
+            # Safely unescape only JSON control characters, don't use unicode_escape on the whole string
+            # as it breaks already decoded UTF-8 characters (Russian).
+            display_text = display_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+            
+            new_chars = len(display_text) - last_edit_len
 
-        # Edit periodically: every STREAM_EDIT_INTERVAL seconds AND at least STREAM_MIN_CHARS new
-        if now - last_edit_time >= STREAM_EDIT_INTERVAL and new_chars >= STREAM_MIN_CHARS:
-            # Strip BUTTONS marker from display during streaming
-            display = accumulated.split(BUTTONS_MARKER)[0].rstrip()
-            safe = sanitize_telegram_html(display + " ▌")
-            if safe.strip():
-                await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
-            last_edit_len = len(accumulated)
-            last_edit_time = now
+            # Edit periodically: every STREAM_EDIT_INTERVAL seconds AND at least STREAM_MIN_CHARS new
+            if now - last_edit_time >= STREAM_EDIT_INTERVAL and new_chars >= STREAM_MIN_CHARS:
+                safe = sanitize_telegram_html(display_text + " ▌")
+                if safe.strip():
+                    await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
+                last_edit_len = len(display_text)
+                last_edit_time = now
 
     return accumulated
 
@@ -199,11 +237,12 @@ async def answer(
             chat_history_str, memory_context_str, prefix=prefix,
         )
 
+        clean_text, suggested = parse_suggested_buttons(full_response)
+
         sources_text = docs_to_sources_str(docs)
         if sources_text:
-            full_response += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
+            clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
 
-        clean_text, suggested = parse_suggested_buttons(full_response)
         safe_text = sanitize_telegram_html(clean_text)
 
         keyboard = None
@@ -284,11 +323,12 @@ async def answer_to_replied(
             chat_history_str, memory_context_str, prefix=prefix,
         )
 
+        clean_text, suggested = parse_suggested_buttons(full_response)
+
         sources_text = docs_to_sources_str(docs)
         if sources_text:
-            full_response += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
+            clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
 
-        clean_text, suggested = parse_suggested_buttons(full_response)
         safe_text = sanitize_telegram_html(clean_text)
 
         keyboard = None

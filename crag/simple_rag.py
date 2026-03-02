@@ -90,6 +90,20 @@ class SimpleRAG:
                                                 .replace("{chat_history}", chat_history) \
                                                 .replace("{context}", context)
 
+        # Define schema for structured output to guarantee format
+        response_schema = {
+            "type": "OBJECT",
+            "properties": {
+                "answer": {"type": "STRING", "description": "The main text of the response to the user question."},
+                "suggested_questions": {
+                    "type": "ARRAY", 
+                    "items": {"type": "STRING"},
+                    "description": "3-4 suggested follow-up questions relevant to the current state."
+                }
+            },
+            "required": ["answer", "suggested_questions"]
+        }
+
         loop = asyncio.get_event_loop()
         try:
             response = await loop.run_in_executor(None, lambda: self.client.models.generate_content_stream(
@@ -98,14 +112,20 @@ class SimpleRAG:
                 config=types.GenerateContentConfig(
                     system_instruction=sys_prompt,
                     temperature=0.0,
+                    response_mime_type="application/json",
+                    response_schema=response_schema
                 )
             ))
             
             for chunk in response:
-                yield chunk.text
+                if chunk.text:
+                    yield chunk.text
         except Exception as e:
             logger.error(f"Error streaming from Gemini: {e}")
-            yield "Извините, произошла ошибка при генерации ответа."
+            yield json.dumps({
+                "answer": "Извините, произошла ошибка при генерации ответа.",
+                "suggested_questions": []
+            })
 
     async def aadd_documents(self, docs: List[Document]) -> List[int]:
         """Add new documents, chunking and embedding manually."""

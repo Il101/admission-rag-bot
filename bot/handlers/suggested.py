@@ -82,11 +82,12 @@ def build_suggested_handler(simple_rag, db_session):
                 chat_history_str, memory_context_str, prefix=prefix,
             )
 
+            clean_text, suggested = parse_suggested_buttons(full_response)
+
             sources_text = docs_to_sources_str(docs)
             if sources_text:
-                full_response += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
+                clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
 
-            clean_text, suggested = parse_suggested_buttons(full_response)
             safe_text = sanitize_telegram_html(clean_text)
 
             keyboard = None
