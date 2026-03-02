@@ -1,0 +1,36 @@
+# Knowledge Base Schema v3.0
+# Used by ingest_all.py to validate source entries
+
+topics:
+  - general-admission
+  - university-admission
+  - visa
+  - nostrification
+  - tuition-fees
+  - scholarships
+  - german-language
+  - ukraine-special
+  - contacts
+  - living-costs
+
+universities:
+  - uni-wien
+  - tu-wien
+  - wu-wien
+  - meduni-wien
+  - uni-graz
+  - uni-innsbruck
+  - uni-salzburg
+  - jku-linz
+
+country_scopes:
+  - ALL
+  - UA
+  - RU
+  - BY
+  - KZ
+
+levels:
+  - bachelor
+  - master
+  - school

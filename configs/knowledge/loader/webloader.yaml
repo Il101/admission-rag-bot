@@ -1,0 +1,2 @@
+_target_: crag.knowledge.loaders.web_loader.load
+_partial_: True
