@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import hashlib
 import yaml
 import json
@@ -12,22 +13,179 @@ from google.genai import types
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def split_text(text_content: str, max_length: int = 500) -> list[str]:
-    """A very simple recursive character splitter equivalent."""
-    paragraphs = text_content.split('\n\n')
+
+# ── YAML Frontmatter Parsing ──────────────────────────────────────────────
+
+def parse_frontmatter(content: str) -> tuple[dict, str]:
+    """Extract YAML frontmatter and body from a markdown file.
+    
+    Returns (metadata_dict, body_text). If no frontmatter found,
+    returns ({}, full_content).
+    """
+    if not content.startswith("---"):
+        return {}, content
+
+    end = content.find("---", 3)
+    if end == -1:
+        return {}, content
+
+    frontmatter_str = content[3:end].strip()
+    body = content[end + 3:].strip()
+
+    try:
+        metadata = yaml.safe_load(frontmatter_str)
+        if not isinstance(metadata, dict):
+            return {}, content
+        return metadata, body
+    except yaml.YAMLError:
+        logger.warning(f"Failed to parse YAML frontmatter")
+        return {}, content
+
+
+# ── Markdown-Aware Chunking ───────────────────────────────────────────────
+
+def split_markdown(body: str, file_metadata: dict, max_chunk_len: int = 800) -> list[dict]:
+    """Split markdown body into chunks, preserving heading hierarchy.
+
+    Each chunk inherits the chain of headings above it as a section_path,
+    and gets a contextual prefix prepended for better embedding quality.
+    
+    Returns list of {"content": str, "metadata": dict}.
+    """
+    lines = body.split("\n")
+    
+    # Track current heading hierarchy: {level: heading_text}
+    heading_stack: dict[int, str] = {}
+    
+    # Collect sections: each section is (heading_stack_snapshot, text_lines)
+    sections: list[tuple[dict, list[str]]] = []
+    current_lines: list[str] = []
+    current_headings: dict[int, str] = {}
+    
+    for line in lines:
+        heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+        if heading_match:
+            # Save the current section before starting a new one
+            if current_lines:
+                text = "\n".join(current_lines).strip()
+                if text:
+                    sections.append((dict(current_headings), current_lines[:]))
+                current_lines = []
+            
+            level = len(heading_match.group(1))
+            heading_text = heading_match.group(2).strip()
+            
+            # Update heading stack: set this level and clear deeper levels
+            heading_stack[level] = heading_text
+            keys_to_remove = [k for k in heading_stack if k > level]
+            for k in keys_to_remove:
+                del heading_stack[k]
+            
+            # Snapshot current headings for this section
+            current_headings = dict(heading_stack)
+            current_lines.append(line)
+        else:
+            current_lines.append(line)
+    
+    # Don't forget the last section
+    if current_lines:
+        text = "\n".join(current_lines).strip()
+        if text:
+            sections.append((dict(current_headings), current_lines[:]))
+    
+    # Build the document title from the H1 or from metadata
+    doc_title = file_metadata.get("title", "")
+    if not doc_title:
+        # Try to get it from heading_stack level 1
+        for headings, _ in sections:
+            if 1 in headings:
+                doc_title = headings[1]
+                break
+    if not doc_title:
+        doc_title = file_metadata.get("source", "Документ").replace(".md", "").replace("-", " ").title()
+
+    # Now build chunks from sections
+    chunks = []
+    
+    for headings, section_lines in sections:
+        section_text = "\n".join(section_lines).strip()
+        if not section_text or len(section_text) < 30:
+            continue
+        
+        # Build section_path from heading hierarchy (skip H1 which is the doc title)
+        path_parts = []
+        for lvl in sorted(headings.keys()):
+            if lvl == 1:
+                continue  # H1 is the doc title, already in prefix
+            path_parts.append(headings[lvl])
+        section_path = " > ".join(path_parts) if path_parts else ""
+        
+        # Build contextual prefix
+        prefix_parts = []
+        university = file_metadata.get("university", "")
+        if university:
+            prefix_parts.append(f"Университет: {university}")
+        elif doc_title:
+            prefix_parts.append(doc_title)
+        
+        topic = file_metadata.get("topic", "")
+        if topic:
+            prefix_parts.append(f"Тема: {topic}")
+        
+        if section_path:
+            prefix_parts.append(f"Раздел: {section_path}")
+        
+        prefix = "[" + " | ".join(prefix_parts) + "]" if prefix_parts else ""
+        
+        # Build chunk metadata
+        chunk_meta = {
+            "source": file_metadata.get("source", ""),
+            "title": doc_title,
+            "section_path": section_path,
+        }
+        # Copy important fields from frontmatter
+        for key in ("source_url", "university", "topic", "country_scope", "level", "city", "related_docs"):
+            if key in file_metadata:
+                chunk_meta[key] = file_metadata[key]
+        
+        # If section is small enough, emit as a single chunk
+        if len(section_text) <= max_chunk_len:
+            content = f"{prefix}\n{section_text}" if prefix else section_text
+            chunks.append({"content": content, "metadata": chunk_meta})
+        else:
+            # Split large sections by paragraphs with overlap
+            sub_chunks = _split_long_section(section_text, max_chunk_len, overlap=50)
+            for i, sub in enumerate(sub_chunks):
+                sub_path = f"{section_path} (часть {i+1})" if section_path else f"часть {i+1}"
+                sub_meta = dict(chunk_meta)
+                sub_meta["section_path"] = sub_path
+                content = f"{prefix}\n{sub}" if prefix else sub
+                chunks.append({"content": content, "metadata": sub_meta})
+    
+    return chunks
+
+
+def _split_long_section(text: str, max_length: int = 800, overlap: int = 50) -> list[str]:
+    """Split a long text section by paragraphs, with character overlap."""
+    paragraphs = text.split("\n\n")
     chunks = []
     current_chunk = ""
-
+    
     for p in paragraphs:
-        if len(current_chunk) + len(p) > max_length and current_chunk:
+        if len(current_chunk) + len(p) + 2 > max_length and current_chunk:
             chunks.append(current_chunk.strip())
-            current_chunk = p
+            # Overlap: keep last N characters as start of next chunk
+            if overlap > 0 and len(current_chunk) > overlap:
+                current_chunk = current_chunk[-overlap:] + "\n\n" + p
+            else:
+                current_chunk = p
         else:
             current_chunk += "\n\n" + p if current_chunk else p
-            
-    if current_chunk:
+    
+    if current_chunk.strip():
         chunks.append(current_chunk.strip())
-    # Further break down giant paragraphs if needed
+    
+    # Further break down giant paragraphs
     final_chunks = []
     for c in chunks:
         if len(c) > max_length * 2:
@@ -43,8 +201,11 @@ def split_text(text_content: str, max_length: int = 500) -> list[str]:
                 final_chunks.append(temp.strip())
         else:
             final_chunks.append(c)
-            
+    
     return final_chunks
+
+
+# ── Main Indexing Logic ───────────────────────────────────────────────────
 
 async def index():
     logger.info("Initializing pipeline without LangChain...")
@@ -93,6 +254,12 @@ async def index():
             )
         """))
         
+        # GIN index for JSONB metadata filtering
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_simple_documents_metadata "
+            "ON simple_documents USING GIN (metadata)"
+        ))
+        
         # Check if table has data. Even if hash matches, table might be empty
         count = conn.execute(text("SELECT count(*) FROM simple_documents")).scalar()
 
@@ -108,28 +275,42 @@ async def index():
         conn.execute(text("DROP TABLE IF EXISTS docstore CASCADE"))
         conn.execute(text("TRUNCATE TABLE simple_documents RESTART IDENTITY"))
 
-    # Load and chunk markdown
+    # Load and chunk markdown with metadata-aware splitting
     logger.info("Loading documents from knowledge_base/...")
     all_chunks = []
     for path in md_files:
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
-            # Simple metadata extraction
-            source = os.path.basename(path)
-            title = source.replace(".md", "").replace("-", " ").title()
-            chunks = split_text(content, max_length=500)
-            for c in chunks:
-                if c.strip():
-                    all_chunks.append({
-                        "content": c,
-                        "metadata": {"source": source, "title": title}
-                    })
+        
+        source = os.path.basename(path)
+        
+        # Skip non-content files
+        if source.startswith("_") or source == "schema.yaml":
+            continue
+        
+        # Parse YAML frontmatter and body
+        frontmatter, body = parse_frontmatter(content)
+        
+        # Build file-level metadata
+        file_metadata = {
+            "source": source,
+            **frontmatter,  # includes source_url, university, topic, country_scope, level, etc.
+        }
+        
+        # Use markdown-aware chunking
+        chunks = split_markdown(body, file_metadata, max_chunk_len=800)
+        
+        for chunk in chunks:
+            if chunk["content"].strip():
+                all_chunks.append(chunk)
+        
+        logger.info(f"  📄 {source}: {len(chunks)} chunks (frontmatter: {bool(frontmatter)})")
 
     if not all_chunks:
         logger.warning("No documents found in knowledge_base/!")
         return
         
-    logger.info(f"Loaded {len(all_chunks)} chunks. Generating embeddings...")
+    logger.info(f"Loaded {len(all_chunks)} chunks total. Generating embeddings...")
     client = genai.Client()
     
     batch_size = 100
@@ -162,7 +343,7 @@ async def index():
             logger.info("Sleeping 2s to avoid rate limits...")
             await asyncio.sleep(2)
 
-    logger.info(f"Successfully indexed knowledge base. IDs: {total_added} chunks added.")
+    logger.info(f"Successfully indexed knowledge base. {total_added} chunks added.")
     
     # Save the new hash state
     with engine.begin() as conn:

@@ -70,30 +70,38 @@ def tg_message_to_source_str(doc: Document) -> str:
 
 def web_doc_to_source_str(doc: Document) -> str:
     title = doc.metadata.get("title", doc.metadata.get("source", "Документ"))
-    link = doc.metadata.get("source", "")
-    return make_html_link(link, title)
+    section = doc.metadata.get("section_path", "")
+    if section:
+        title = f"{title} — {section}"
+    # Prefer source_url (real URL) over source (filename)
+    link = doc.metadata.get("source_url", doc.metadata.get("source", ""))
+    if link and link.startswith("http"):
+        return make_html_link(link, title)
+    return title
 
 
 def docs_to_sources_str(documents: List[Document]) -> str:
-    links = set()
+    seen_urls = set()
     source_text_rows = []
     idx = 1
     for doc in documents:
         if "is_public" in doc.metadata:
             link = doc.metadata["source"]
             if link != "":
-                if link not in links:
+                if link not in seen_urls:
                     source_str = tg_message_to_source_str(doc)
-                    links.add(link)
+                    seen_urls.add(link)
                 else:
                     continue
             else:
                 source_str = tg_message_to_source_str(doc)
-        elif doc.metadata["source"] not in links:
-            links.add(doc.metadata["source"])
-            source_str = web_doc_to_source_str(doc)
         else:
-            continue
+            # Deduplicate by source_url (real URL) or by source (filename)
+            dedup_key = doc.metadata.get("source_url", doc.metadata.get("source", ""))
+            if dedup_key in seen_urls:
+                continue
+            seen_urls.add(dedup_key)
+            source_str = web_doc_to_source_str(doc)
 
         out_row = f"[{idx}] {source_str}"
         source_text_rows.append(out_row)

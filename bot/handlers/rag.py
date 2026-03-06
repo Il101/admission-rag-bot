@@ -178,6 +178,28 @@ async def _load_memory(db_session, tg_id, onboarding_data):
     return memory, chat_history_str, memory_context_str
 
 
+def _build_user_filters(onboarding_data: dict) -> dict:
+    """Build metadata filters from user's onboarding profile.
+    
+    Used to pre-filter knowledge base chunks by country_scope
+    so users from specific countries get more relevant results.
+    """
+    filters = {}
+    country = onboarding_data.get("country")
+    if country:
+        # Map onboarding country values to country_scope codes
+        country_map = {
+            "россия": "RU", "russia": "RU", "ru": "RU",
+            "украина": "UA", "ukraine": "UA", "ua": "UA",
+            "беларусь": "BY", "belarus": "BY", "by": "BY",
+            "казахстан": "KZ", "kazakhstan": "KZ", "kz": "KZ",
+        }
+        code = country_map.get(country.lower().strip(), "")
+        if code:
+            filters["country_scope"] = code
+    return filters
+
+
 @with_db_session()
 @filter_banned()
 async def answer(
@@ -212,7 +234,8 @@ async def answer(
             text="🔍 Ищу информацию...",
         )
 
-        docs = await simple_rag.aretrieve(question)
+        user_filters = _build_user_filters(onboarding_data)
+        docs = await simple_rag.aretrieve(question, user_filters=user_filters)
         actual_question = question
 
         if len(docs) == 0:
@@ -298,7 +321,8 @@ async def answer_to_replied(
             text="🔍 Ищу информацию...",
         )
 
-        docs = await simple_rag.aretrieve(question)
+        user_filters = _build_user_filters(onboarding_data)
+        docs = await simple_rag.aretrieve(question, user_filters=user_filters)
         actual_question = question
 
         if len(docs) == 0:

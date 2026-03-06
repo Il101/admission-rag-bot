@@ -16,7 +16,29 @@ class Document:
     metadata: dict
 
 def documents_to_context_str(docs: List[Document]) -> str:
-    return "\n\n".join(doc.page_content for doc in docs)
+    """Convert documents to context string with source attribution."""
+    parts = []
+    for doc in docs:
+        source_url = doc.metadata.get("source_url", "")
+        section = doc.metadata.get("section_path", "")
+        title = doc.metadata.get("title", doc.metadata.get("source", ""))
+        
+        # Build attribution header
+        header_parts = []
+        if title:
+            header_parts.append(title)
+        if section:
+            header_parts.append(section)
+        if source_url:
+            header_parts.append(source_url)
+        
+        header = " — ".join(header_parts)
+        if header:
+            parts.append(f"[Источник: {header}]\n{doc.page_content}")
+        else:
+            parts.append(doc.page_content)
+    
+    return "\n\n".join(parts)
 
 class SimpleRAG:
     """A direct implementation of RAG without LangChain/LangGraph overhead."""
@@ -60,24 +82,59 @@ class SimpleRAG:
             logger.error(f"Error getting embedding: {e}")
             return []
 
-    async def aretrieve(self, query: str, top_k: int = 4) -> List[Document]:
+    @staticmethod
+    def _build_filter_sql(user_filters: dict) -> tuple[str, dict]:
+        """Build SQL WHERE clause from user filters.
+        
+        Implements hybrid filtering: filters by country_scope (always includes 'ALL'),
+        but does NOT filter by level (user may be interested in both bachelor and master).
+        
+        Returns (where_clause_str, params_dict).
+        """
+        conditions = []
+        params = {}
+        
+        country = user_filters.get("country_scope")
+        if country and country != "ALL":
+            # Match documents that have 'ALL' or the user's specific country
+            conditions.append(
+                "(metadata->'country_scope' @> '\"ALL\"'::jsonb "
+                "OR metadata->'country_scope' @> (:country_filter)::jsonb)"
+            )
+            params["country_filter"] = json.dumps(country)  # e.g. '"RU"'
+        
+        if not conditions:
+            return "", params
+        
+        return "WHERE " + " AND ".join(conditions), params
+
+    async def aretrieve(self, query: str, top_k: int = 6, user_filters: dict = None) -> List[Document]:
         loop = asyncio.get_event_loop()
         embedding = await loop.run_in_executor(None, self.get_embedding, query)
         
         if not embedding:
             return []
 
-        sql = text("""
+        # Build optional metadata filter
+        where_clause = ""
+        filter_params = {}
+        if user_filters:
+            where_clause, filter_params = self._build_filter_sql(user_filters)
+
+        sql_str = f"""
             SELECT content, metadata
             FROM simple_documents
+            {where_clause}
             ORDER BY embedding <=> CAST(:embedding AS vector)
             LIMIT :top_k
-        """)
+        """
         
         docs = []
+        all_params = {"embedding": str(embedding), "top_k": top_k, **filter_params}
+        
         # Uses standard psycopg SQLAlchemy synchronous execution locally
         with self.db_engine.connect() as conn:
-            result = conn.execute(sql, {"embedding": str(embedding), "top_k": top_k})
+            result = conn.execute(text(sql_str), all_params)
             for row in result:
                 docs.append(Document(page_content=row[0], metadata=row[1]))
                 
