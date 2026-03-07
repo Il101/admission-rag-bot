@@ -51,11 +51,23 @@ class SimpleRAG:
         self.rag_prompt_messages = []
         self.system_prompt = ""
         self.human_prompt_template = "{question}\nКонтекст:\n{context}"
+        self.rewrite_prompt_template = ""
+        self.grading_prompt_template = ""
         
         if prompts_config:
             self.rag_prompt_messages = prompts_config.get("rag_prompt", {}).get("messages", [])
             self.system_prompt = self._extract_system_prompt(self.rag_prompt_messages)
             self.human_prompt_template = self._extract_human_prompt(self.rag_prompt_messages)
+            
+            # Load rewriting prompt template
+            rewriting_messages = prompts_config.get("rewriting_prompt", {}).get("messages", [])
+            self.rewrite_prompt_template = self._extract_human_prompt_from_messages(rewriting_messages)
+            self.rewrite_system_prompt = self._extract_system_prompt(rewriting_messages)
+            
+            # Load grading prompt template
+            grading_messages = prompts_config.get("grading_prompt", {}).get("messages", [])
+            self.grading_prompt_template = self._extract_human_prompt_from_messages(grading_messages)
+            self.grading_system_prompt = self._extract_system_prompt(grading_messages)
 
     def _extract_system_prompt(self, messages: list) -> str:
         for m in messages:
@@ -68,6 +80,10 @@ class SimpleRAG:
             if m.get("_target_") == "langchain_core.prompts.HumanMessagePromptTemplate.from_template":
                 return m.get("template", "")
         return "Вопрос: {question}\nКонтекст: {context}\nИстория: {chat_history}\nПамять: {memory_context}"
+
+    def _extract_human_prompt_from_messages(self, messages: list) -> str:
+        """Same as above, alias for clarity."""
+        return self._extract_human_prompt(messages)
 
     def get_embedding(self, text_input: str) -> List[float]:
         if not text_input.strip():
@@ -84,29 +100,48 @@ class SimpleRAG:
 
     @staticmethod
     def _build_filter_sql(user_filters: dict) -> tuple[str, dict]:
-        """Build SQL WHERE clause from user filters.
+        """Build SQL WHERE clause and ORDER BY hint from user filters.
         
-        Implements hybrid filtering: filters by country_scope (always includes 'ALL'),
-        but does NOT filter by level (user may be interested in both bachelor and master).
+        - Filters by country_scope (always includes 'ALL').
+        - Soft-boosts results matching user's level via ORDER BY priority.
         
-        Returns (where_clause_str, params_dict).
+        Returns (where_clause_str, params_dict, level_boost_expr).
         """
         conditions = []
         params = {}
         
         country = user_filters.get("country_scope")
         if country and country != "ALL":
-            # Match documents that have 'ALL' or the user's specific country
             conditions.append(
                 "(metadata->'country_scope' @> '\"ALL\"'::jsonb "
                 "OR metadata->'country_scope' @> (:country_filter)::jsonb)"
             )
             params["country_filter"] = json.dumps(country)  # e.g. '"RU"'
         
-        if not conditions:
-            return "", params
+        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        return where_clause, params
+
+    def _build_level_boost_expr(self, user_filters: dict) -> tuple[str, dict]:
+        """Build a level soft-boost expression for ORDER BY.
         
-        return "WHERE " + " AND ".join(conditions), params
+        Returns docs matching the user's level first, then everything else.
+        """
+        level = user_filters.get("level")
+        if not level:
+            return "", {}
+        return (
+            "CASE WHEN metadata->'level' @> (:user_level)::jsonb THEN 0 ELSE 1 END",
+            {"user_level": json.dumps([level])}
+        )
+
+    def _db_retrieve(self, sql_str: str, all_params: dict) -> List[Document]:
+        """Synchronous DB query — called via run_in_executor to avoid blocking event loop."""
+        docs = []
+        with self.db_engine.connect() as conn:
+            result = conn.execute(text(sql_str), all_params)
+            for row in result:
+                docs.append(Document(page_content=row[0], metadata=row[1]))
+        return docs
 
     async def aretrieve(self, query: str, top_k: int = 6, user_filters: dict = None) -> List[Document]:
         loop = asyncio.get_event_loop()
@@ -118,27 +153,120 @@ class SimpleRAG:
         # Build optional metadata filter
         where_clause = ""
         filter_params = {}
+        level_boost_expr = ""
+        level_params = {}
+
         if user_filters:
             where_clause, filter_params = self._build_filter_sql(user_filters)
+            level_boost_expr, level_params = self._build_level_boost_expr(user_filters)
+
+        # Build ORDER BY: level boost first, then cosine similarity
+        if level_boost_expr:
+            order_by = f"ORDER BY {level_boost_expr} ASC, embedding <=> CAST(:embedding AS vector)"
+        else:
+            order_by = "ORDER BY embedding <=> CAST(:embedding AS vector)"
 
         sql_str = f"""
             SELECT content, metadata
             FROM simple_documents
             {where_clause}
-            ORDER BY embedding <=> CAST(:embedding AS vector)
+            {order_by}
             LIMIT :top_k
         """
         
-        docs = []
-        all_params = {"embedding": str(embedding), "top_k": top_k, **filter_params}
+        all_params = {
+            "embedding": str(embedding),
+            "top_k": top_k,
+            **filter_params,
+            **level_params,
+        }
         
-        # Uses standard psycopg SQLAlchemy synchronous execution locally
-        with self.db_engine.connect() as conn:
-            result = conn.execute(text(sql_str), all_params)
-            for row in result:
-                docs.append(Document(page_content=row[0], metadata=row[1]))
-                
+        # Run blocking DB call in thread pool to not block event loop
+        docs = await loop.run_in_executor(None, self._db_retrieve, sql_str, all_params)
         return docs
+
+    async def arewrite_query(self, question: str, chat_history: str, memory_context: str) -> str:
+        """Rewrite user question for better vector search using conversation context.
+        
+        Resolves anaphora (e.g. 'расскажи подробнее', 'а там?'), enriches with
+        domain keywords, and clarifies ambiguous references.
+        Gracefully falls back to the original question on any error.
+        """
+        if not self.rewrite_prompt_template:
+            return question
+
+        user_prompt = (
+            self.rewrite_prompt_template
+            .replace("{question}", question)
+            .replace("{chat_history}", chat_history)
+            .replace("{memory_context}", memory_context)
+        )
+
+        loop = asyncio.get_event_loop()
+        try:
+            response = await loop.run_in_executor(None, lambda: self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.rewrite_system_prompt,
+                    temperature=0.0,
+                )
+            ))
+            rewritten = (response.text or "").strip()
+            if rewritten:
+                logger.info(f"Query rewrite: '{question[:60]}' → '{rewritten[:60]}'")
+                return rewritten
+        except Exception as e:
+            logger.warning(f"Query rewriting failed, using original: {e}")
+        return question
+
+    async def _grade_one(self, question: str, doc: Document) -> int:
+        """Grade a single document for relevance to the question. Returns 0 or 1."""
+        user_prompt = (
+            self.grading_prompt_template
+            .replace("{question}", question)
+            .replace("{document}", doc.page_content[:800])
+        )
+        loop = asyncio.get_event_loop()
+        try:
+            response = await loop.run_in_executor(None, lambda: self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.grading_system_prompt,
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                )
+            ))
+            raw = (response.text or "{}").strip()
+            data = json.loads(raw)
+            return int(data.get("score", 1))
+        except Exception as e:
+            logger.warning(f"Grading failed for doc, keeping it: {e}")
+            return 1  # fail-open: keep document if grading errors
+
+    async def agrade_documents(self, question: str, docs: List[Document]) -> List[Document]:
+        """Filter docs by relevance using CRAG grading prompt.
+        
+        Runs all grading calls concurrently. Falls back to full doc list
+        if all docs get filtered (prevents empty-context hallucination prompt).
+        """
+        if not self.grading_prompt_template or not docs:
+            return docs
+
+        scores = await asyncio.gather(
+            *[self._grade_one(question, doc) for doc in docs],
+            return_exceptions=False,
+        )
+        relevant = [doc for doc, score in zip(docs, scores) if score == 1]
+        
+        if relevant:
+            logger.info(f"Grading: {len(docs)} → {len(relevant)} relevant docs")
+            return relevant
+        else:
+            # All filtered — fall back to original set to avoid empty context
+            logger.info(f"Grading filtered all docs, falling back to full set ({len(docs)})")
+            return docs
 
     async def astream_answer(self, question: str, context: str, chat_history: str, memory_context: str, current_date: str) -> AsyncGenerator[str, None]:
         sys_prompt = self.system_prompt.replace("{current_date}", current_date)
@@ -204,7 +332,6 @@ class SimpleRAG:
         """Delete by id from DB."""
         try:
             with self.db_engine.begin() as conn:
-                # ids is a list of strings but DB id is INT
                 for doc_id in ids:
                     conn.execute(text("DELETE FROM simple_documents WHERE id = :id"), {"id": int(doc_id)})
             return True

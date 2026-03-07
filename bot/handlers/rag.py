@@ -26,6 +26,21 @@ logger = logging.getLogger(__name__)
 STREAM_EDIT_INTERVAL = 1.2  # seconds between edits
 STREAM_MIN_CHARS = 80       # min new chars before edit
 
+# Country → country_scope code mapping (module-level constant for easy extension)
+COUNTRY_TO_SCOPE: dict[str, str] = {
+    "россия": "RU", "russia": "RU", "ru": "RU",
+    "украина": "UA", "ukraine": "UA", "ua": "UA",
+    "беларусь": "BY", "belarus": "BY", "by": "BY",
+    "казахстан": "KZ", "kazakhstan": "KZ", "kz": "KZ",
+}
+
+# Level → scope code mapping
+LEVEL_TO_SCOPE: dict[str, str] = {
+    "bachelor": "bachelor",
+    "master": "master",
+    "phd": "phd",
+}
+
 
 def parse_suggested_buttons(text: str) -> tuple:
     """Extract suggested questions from the structured JSON response.
@@ -53,10 +68,8 @@ def parse_suggested_buttons(text: str) -> tuple:
         return text, []
     except json.JSONDecodeError:
         logger.warning(f"Failed to parse JSON from response. Text starts with: {text[:100]}")
-        # Fallback for non-JSON or partial JSON
-        # Try to extract "answer" content
+        # Fallback: attempt regex extraction
         ans_match = re.search(r'"answer":\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
-        # Try to extract "suggested_questions" array
         btns_match = re.search(r'"suggested_questions":\s*(\[[^\]]*\])', text, re.DOTALL)
         
         ans = text
@@ -69,7 +82,6 @@ def parse_suggested_buttons(text: str) -> tuple:
             try:
                 btns = json.loads(btns_match.group(1))
             except:
-                # Last resort regex for strings in the array
                 btns = re.findall(r'"([^"]*)"', btns_match.group(1))
         
         return ans, btns
@@ -119,7 +131,6 @@ async def _stream_answer(
     last_edit_len = len(prefix)
 
     # Regex to extract partial answer from a JSON stream: {"answer": "..."}
-    # We look for the "answer" key and capture its content until it closes or stream ends.
     answer_regex = re.compile(r'"answer":\s*"((?:[^"\\]|\\.)*)', re.DOTALL)
 
     async for chunk in simple_rag.astream_answer(
@@ -128,17 +139,13 @@ async def _stream_answer(
         accumulated += chunk
         now = time.monotonic()
         
-        # Extract what we have of the answer so far
         match = answer_regex.search(accumulated)
         if match:
             display_text = match.group(1)
-            # Safely unescape only JSON control characters, don't use unicode_escape on the whole string
-            # as it breaks already decoded UTF-8 characters (Russian).
             display_text = display_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
             
             new_chars = len(display_text) - last_edit_len
 
-            # Edit periodically: every STREAM_EDIT_INTERVAL seconds AND at least STREAM_MIN_CHARS new
             if now - last_edit_time >= STREAM_EDIT_INTERVAL and new_chars >= STREAM_MIN_CHARS:
                 safe = sanitize_telegram_html(display_text + " ▌")
                 if safe.strip():
@@ -181,23 +188,123 @@ async def _load_memory(db_session, tg_id, onboarding_data):
 def _build_user_filters(onboarding_data: dict) -> dict:
     """Build metadata filters from user's onboarding profile.
     
-    Used to pre-filter knowledge base chunks by country_scope
-    so users from specific countries get more relevant results.
+    Filters by country_scope and soft-boosts by level.
     """
     filters = {}
+    
     country = onboarding_data.get("country")
     if country:
-        # Map onboarding country values to country_scope codes
-        country_map = {
-            "россия": "RU", "russia": "RU", "ru": "RU",
-            "украина": "UA", "ukraine": "UA", "ua": "UA",
-            "беларусь": "BY", "belarus": "BY", "by": "BY",
-            "казахстан": "KZ", "kazakhstan": "KZ", "kz": "KZ",
-        }
-        code = country_map.get(country.lower().strip(), "")
+        code = COUNTRY_TO_SCOPE.get(country.lower().strip(), "")
         if code:
             filters["country_scope"] = code
+    
+    target_level = onboarding_data.get("targetLevel")
+    if target_level:
+        code = LEVEL_TO_SCOPE.get(target_level.lower().strip(), "")
+        if code:
+            filters["level"] = code
+
     return filters
+
+
+def _save_suggested(context, db_session, tg_id, suggested: list):
+    """Save suggested questions both in-memory and schedule DB persist."""
+    context.user_data["_suggested_questions"] = suggested
+    # Persist asynchronously so they survive bot restarts
+    if suggested:
+        asyncio.create_task(_persist_suggested(db_session, tg_id, suggested))
+
+
+async def _persist_suggested(db_session, tg_id: int, suggested: list):
+    """Persist suggested questions into journey_state._last_suggested."""
+    from bot.db import get_user_memory, update_user_memory
+    try:
+        memory = await get_user_memory(db_session, tg_id)
+        state = memory.get("journey_state") or {}
+        state["_last_suggested"] = suggested
+        await update_user_memory(db_session, tg_id, journey_state=state)
+    except Exception:
+        logger.warning("Failed to persist suggested questions to DB", exc_info=True)
+
+
+async def _handle_question_core(
+    context,
+    simple_rag,
+    db_session,
+    chat_id: int,
+    reply_to_id: int,
+    tg_id: int,
+    question: str,
+    onboarding_data: dict,
+):
+    """Core logic for answering a question: memory → rewrite → retrieve → grade → stream → send.
+    
+    Shared by answer(), answer_to_replied(), and handle_suggested_question().
+    """
+    memory, chat_history_str, memory_context_str = await _load_memory(
+        db_session, tg_id, onboarding_data
+    )
+
+    msg = await context.bot.send_message(
+        chat_id=chat_id,
+        reply_to_message_id=reply_to_id,
+        text="🔍 Ищу информацию...",
+    )
+
+    # 1. Rewrite query for better vector search (resolves anaphora, adds keywords)
+    actual_question = await simple_rag.arewrite_query(
+        question, chat_history_str, memory_context_str
+    )
+
+    # 2. Retrieve candidates
+    user_filters = _build_user_filters(onboarding_data)
+    docs = await simple_rag.aretrieve(actual_question, user_filters=user_filters)
+
+    # 3. Grade for relevance (CRAG filtering)
+    docs = await simple_rag.agrade_documents(actual_question, docs)
+
+    if len(docs) == 0:
+        giveup_text = "К сожалению, я не смог найти релевантную информацию по этому запросу. 😔"
+        clean_text, suggested = parse_suggested_buttons(giveup_text)
+        safe_text = sanitize_telegram_html(clean_text)
+
+        keyboard = None
+        if suggested:
+            keyboard = suggested_questions_keyboard(suggested)
+            _save_suggested(context, db_session, tg_id, suggested)
+
+        await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        await add_chat_messages(db_session, tg_id, question, clean_text)
+        return
+
+    context_str = documents_to_context_str(docs)
+    
+    # 4. Stream answer
+    full_response = await _stream_answer(
+        msg, simple_rag, actual_question, context_str,
+        chat_history_str, memory_context_str,
+    )
+
+    clean_text, suggested = parse_suggested_buttons(full_response)
+
+    sources_text = docs_to_sources_str(docs)
+    if sources_text:
+        clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
+
+    safe_text = sanitize_telegram_html(clean_text)
+
+    keyboard = None
+    if suggested:
+        keyboard = suggested_questions_keyboard(suggested)
+        _save_suggested(context, db_session, tg_id, suggested)
+
+    await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+    # 5. Persist conversation + update memory (fire-and-forget — doesn't delay response)
+    await add_chat_messages(db_session, tg_id, question, clean_text)
+    asyncio.create_task(
+        update_journey_and_summary(simple_rag, db_session, tg_id, question, clean_text)
+    )
 
 
 @with_db_session()
@@ -218,71 +325,22 @@ async def answer(
         )
         return
 
-    chat_id = update.effective_chat.id
-    reply_to_id = update.effective_message.id
-
     try:
-        tg_id = update.effective_user.id
-        onboarding_data = context.user_data.get("onboarding", {})
-        memory, chat_history_str, memory_context_str = await _load_memory(
-            db_session, tg_id, onboarding_data
+        await _handle_question_core(
+            context=context,
+            simple_rag=simple_rag,
+            db_session=db_session,
+            chat_id=update.effective_chat.id,
+            reply_to_id=update.effective_message.id,
+            tg_id=update.effective_user.id,
+            question=question,
+            onboarding_data=context.user_data.get("onboarding", {}),
         )
-
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            reply_to_message_id=reply_to_id,
-            text="🔍 Ищу информацию...",
-        )
-
-        user_filters = _build_user_filters(onboarding_data)
-        docs = await simple_rag.aretrieve(question, user_filters=user_filters)
-        actual_question = question
-
-        if len(docs) == 0:
-            giveup_text = "К сожалению, я не смог найти релевантную информацию по этому запросу. 😔"
-            clean_text, suggested = parse_suggested_buttons(giveup_text)
-            safe_text = sanitize_telegram_html(clean_text)
-
-            keyboard = None
-            if suggested:
-                keyboard = suggested_questions_keyboard(suggested)
-                context.user_data["_suggested_questions"] = suggested
-
-            await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-            await add_chat_messages(db_session, tg_id, question, clean_text)
-            return
-
-        prefix = ""
-        context_str = documents_to_context_str(docs)
-        
-        full_response = await _stream_answer(
-            msg, simple_rag, actual_question, context_str,
-            chat_history_str, memory_context_str, prefix=prefix,
-        )
-
-        clean_text, suggested = parse_suggested_buttons(full_response)
-
-        sources_text = docs_to_sources_str(docs)
-        if sources_text:
-            clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
-
-        safe_text = sanitize_telegram_html(clean_text)
-
-        keyboard = None
-        if suggested:
-            keyboard = suggested_questions_keyboard(suggested)
-            context.user_data["_suggested_questions"] = suggested
-
-        await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-
-        await add_chat_messages(db_session, tg_id, question, clean_text)
-        await update_journey_and_summary(simple_rag, db_session, tg_id, question, clean_text)
-
     except Exception:
         logger.exception("Error in answer handler")
         await context.bot.send_message(
-            chat_id=chat_id,
-            reply_to_message_id=reply_to_id,
+            chat_id=update.effective_chat.id,
+            reply_to_message_id=update.effective_message.id,
             text="⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.",
         )
 
@@ -305,78 +363,29 @@ async def answer_to_replied(
         )
         return
 
-    chat_id = update.effective_chat.id
-    reply_to_id = update.effective_message.reply_to_message.id
-
     try:
-        tg_id = update.effective_user.id
-        onboarding_data = context.user_data.get("onboarding", {})
-        memory, chat_history_str, memory_context_str = await _load_memory(
-            db_session, tg_id, onboarding_data
+        await _handle_question_core(
+            context=context,
+            simple_rag=simple_rag,
+            db_session=db_session,
+            chat_id=update.effective_chat.id,
+            reply_to_id=update.effective_message.reply_to_message.id,
+            tg_id=update.effective_user.id,
+            question=question,
+            onboarding_data=context.user_data.get("onboarding", {}),
         )
-
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            reply_to_message_id=reply_to_id,
-            text="🔍 Ищу информацию...",
-        )
-
-        user_filters = _build_user_filters(onboarding_data)
-        docs = await simple_rag.aretrieve(question, user_filters=user_filters)
-        actual_question = question
-
-        if len(docs) == 0:
-            giveup_text = "К сожалению, я не смог найти релевантную информацию по этому запросу. 😔"
-            clean_text, suggested = parse_suggested_buttons(giveup_text)
-            safe_text = sanitize_telegram_html(clean_text)
-
-            keyboard = None
-            if suggested:
-                keyboard = suggested_questions_keyboard(suggested)
-                context.user_data["_suggested_questions"] = suggested
-
-            await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-            await add_chat_messages(db_session, tg_id, question, clean_text)
-            return
-
-        prefix = ""
-        context_str = documents_to_context_str(docs)
-        
-        full_response = await _stream_answer(
-            msg, simple_rag, actual_question, context_str,
-            chat_history_str, memory_context_str, prefix=prefix,
-        )
-
-        clean_text, suggested = parse_suggested_buttons(full_response)
-
-        sources_text = docs_to_sources_str(docs)
-        if sources_text:
-            clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
-
-        safe_text = sanitize_telegram_html(clean_text)
-
-        keyboard = None
-        if suggested:
-            keyboard = suggested_questions_keyboard(suggested)
-            context.user_data["_suggested_questions"] = suggested
-
-        await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-
-        await add_chat_messages(db_session, tg_id, question, clean_text)
-        await update_journey_and_summary(simple_rag, db_session, tg_id, question, clean_text)
-
     except Exception:
         logger.exception("Error in answer_to_replied handler")
         await context.bot.send_message(
-            chat_id=chat_id,
-            reply_to_message_id=reply_to_id,
-            text="⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.",
+            chat_id=update.effective_chat.id,
+            reply_to_message_id=update.effective_message.reply_to_message.id,
+            text="⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйста попробуйте позже.",
         )
 
 
 @with_db_session()
 @filter_banned()
-async def retieve_docs(
+async def retrieve_docs(
     update: Update, context: ContextTypes.DEFAULT_TYPE, simple_rag, **kwargs
 ):
     question = remove_bot_command(
@@ -396,7 +405,6 @@ async def retieve_docs(
     try:
         docs = await simple_rag.aretrieve(question)
         
-        output = ""
         if len(docs) > 0:
             sources_text = docs_to_sources_str(docs)
             output = "Источники/наиболее релевантные ссылки:\n" + sources_text
@@ -408,7 +416,7 @@ async def retieve_docs(
             output, [], context.user_data,
         )
     except Exception:
-        logger.exception("Error in retieve_docs handler")
+        logger.exception("Error in retrieve_docs handler")
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             reply_to_message_id=update.effective_message.id,
@@ -418,7 +426,7 @@ async def retieve_docs(
 
 @with_db_session()
 @filter_banned()
-async def retieve_docs_to_replied(
+async def retrieve_docs_to_replied(
     update: Update, context: ContextTypes.DEFAULT_TYPE, simple_rag, **kwargs
 ):
     question = remove_bot_command(
@@ -438,7 +446,6 @@ async def retieve_docs_to_replied(
     try:
         docs = await simple_rag.aretrieve(question)
         
-        output = ""
         if len(docs) > 0:
             sources_text = docs_to_sources_str(docs)
             output = "Источники/наиболее релевантные ссылки:\n" + sources_text
@@ -450,9 +457,14 @@ async def retieve_docs_to_replied(
             output, [], context.user_data,
         )
     except Exception:
-        logger.exception("Error in retieve_docs_to_replied handler")
+        logger.exception("Error in retrieve_docs_to_replied handler")
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             reply_to_message_id=update.effective_message.reply_to_message.id,
             text="⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.",
         )
+
+
+# ── Backward-compat aliases for old typo names (used in app.py) ──────────────
+retieve_docs = retrieve_docs
+retieve_docs_to_replied = retrieve_docs_to_replied

@@ -284,8 +284,8 @@ async def index():
         
         source = os.path.basename(path)
         
-        # Skip non-content files
-        if source.startswith("_") or source == "schema.yaml":
+        # Skip non-content files (author docs, schema, registry)
+        if source.startswith("_") or source in ("schema.yaml", "README.md"):
             continue
         
         # Parse YAML frontmatter and body

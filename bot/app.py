@@ -30,8 +30,8 @@ from bot.handlers.management import (
 from bot.handlers.rag import (
     answer,
     answer_to_replied,
-    retieve_docs,
-    retieve_docs_to_replied,
+    retrieve_docs,
+    retrieve_docs_to_replied,
 )
 from bot.handlers.service import error, help_command, ignore, reaction, unknown, delete_data
 from bot.handlers.onboarding import build_onboarding_handler
@@ -48,16 +48,16 @@ def prepare_rag_based_handlers(simple_rag: SimpleRAG, db_session: sessionmaker):
     answer_to_replied_with_graph = partial(
         answer_to_replied, simple_rag=simple_rag, db_session=db_session
     )
-    retieve_docs_with_graph = partial(retieve_docs, simple_rag=simple_rag, db_session=db_session)
-    retieve_docs_to_replied_with_graph = partial(
-        retieve_docs_to_replied, simple_rag=simple_rag, db_session=db_session
+    retrieve_docs_with_graph = partial(retrieve_docs, simple_rag=simple_rag, db_session=db_session)
+    retrieve_docs_to_replied_with_graph = partial(
+        retrieve_docs_to_replied, simple_rag=simple_rag, db_session=db_session
     )
 
     return {
         "answer": answer_with_graph,
         "answer_to_replied": answer_to_replied_with_graph,
-        "retieve": retieve_docs_with_graph,
-        "retieve_to_replied": retieve_docs_to_replied_with_graph,
+        "retrieve": retrieve_docs_with_graph,
+        "retrieve_to_replied": retrieve_docs_to_replied_with_graph,
     }
 
 
@@ -138,9 +138,9 @@ def main(config: DictConfig) -> None:
     answer_to_replied_handler = CommandHandler(
         "ans_rep", rag_handlers["answer_to_replied"], filters=filters.REPLY
     )
-    retieve_docs_handler = CommandHandler("docs", rag_handlers["retieve"])
-    retieve_docs_to_replied_handler = CommandHandler(
-        "docs_rep", rag_handlers["retieve_to_replied"], filters=filters.REPLY
+    retrieve_docs_handler = CommandHandler("docs", rag_handlers["retrieve"])
+    retrieve_docs_to_replied_handler = CommandHandler(
+        "docs_rep", rag_handlers["retrieve_to_replied"], filters=filters.REPLY
     )
 
     private_message_handler = MessageHandler(
@@ -170,8 +170,8 @@ def main(config: DictConfig) -> None:
     application.add_handler(suggested_question_handler)
     application.add_handler(answer_handler)
     application.add_handler(answer_to_replied_handler)
-    application.add_handler(retieve_docs_handler)
-    application.add_handler(retieve_docs_to_replied_handler)
+    application.add_handler(retrieve_docs_handler)
+    application.add_handler(retrieve_docs_to_replied_handler)
     application.add_handler(private_message_handler)
     application.add_handler(add_fact_handler)
     application.add_handler(add_fact_from_replied_handler)
