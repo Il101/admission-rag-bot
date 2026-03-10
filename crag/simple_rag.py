@@ -226,7 +226,7 @@ class SimpleRAG:
         self.db_engine = db_engine
 
         # Build async engine from the sync engine's URL
-        sync_url = str(db_engine.url)
+        sync_url = db_engine.url.render_as_string(hide_password=False)
         async_url = self._to_async_url(sync_url)
         self._async_engine = create_async_engine(
             async_url, pool_size=5, max_overflow=10
