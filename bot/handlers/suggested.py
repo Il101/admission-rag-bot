@@ -81,6 +81,7 @@ def build_suggested_handler(simple_rag, db_session):
                 tg_id=tg_id,
                 question=question,
                 onboarding_data=onboarding_data,
+                db_session_factory=kwargs.get("db_session_factory"),
             )
 
         except Exception:

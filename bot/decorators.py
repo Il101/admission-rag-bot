@@ -1,15 +1,27 @@
+import inspect
+
 from sqlalchemy.future import select
 from telegram.constants import ChatType
 
 from bot.db import Admin, BannedUserOrChat
 
 
+def _strip_extra(func, kwargs: dict) -> dict:
+    """Remove kwargs the target *func* doesn't accept (unless it has **kwargs)."""
+    sig = inspect.signature(func)
+    params = sig.parameters
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return kwargs  # function accepts **kwargs — pass everything
+    return {k: v for k, v in kwargs.items() if k in params}
+
+
 def with_db_session(session_param_name="db_session"):
     def decorator(handler):
         async def wrapper(*args, **kwargs):
-            db_session = kwargs.pop(session_param_name)
-            async with db_session() as session:
+            db_session_factory = kwargs.pop(session_param_name)
+            async with db_session_factory() as session:
                 kwargs[session_param_name] = session
+                kwargs["db_session_factory"] = db_session_factory
                 await handler(*args, **kwargs)
 
         return wrapper
@@ -40,7 +52,7 @@ def admin_only(
                 )
                 return
             else:
-                await handler(*args, **kwargs)
+                await handler(*args, **_strip_extra(handler, kwargs))
 
         return wrapper
 
@@ -69,7 +81,7 @@ def filter_banned(session_param_name="db_session"):
                 if banned_chat is not None:
                     return
 
-            await handler(*args, **kwargs)
+            await handler(*args, **_strip_extra(handler, kwargs))
 
         return wrapper
 

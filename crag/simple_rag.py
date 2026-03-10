@@ -388,7 +388,9 @@ class SimpleRAG:
 
         # Hybrid scoring: combine vector cosine distance and FTS rank
         # Lower score = better match
-        vector_score = "embedding <=> CAST(:embedding AS vector)"
+        # NOTE: parentheses around <=> are critical — without them
+        # PostgreSQL parses "0.7 * embedding <=> ..." as "(0.7 * embedding) <=> ..."
+        vector_score = "(embedding <=> CAST(:embedding AS vector))"
         fts_score = (
             "COALESCE(1.0 - ts_rank_cd("
             "to_tsvector('simple', content) || to_tsvector('russian', content), "

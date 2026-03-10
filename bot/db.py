@@ -138,7 +138,9 @@ class PipelineLog(Base):
 
 @lru_cache(maxsize=1)
 def get_db_sessionmaker(conn_string: str) -> sessionmaker:
-    engine = create_async_engine(conn_string)
+    engine = create_async_engine(
+        conn_string, pool_size=10, max_overflow=20, pool_recycle=1800
+    )
     return sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
@@ -250,7 +252,7 @@ async def get_feedback_stats(session: AsyncSession) -> dict:
 
 
 async def add_pipeline_log(
-    session: AsyncSession,
+    session_factory,
     tg_id: int,
     question: str,
     rewritten_question: str | None,
@@ -259,22 +261,27 @@ async def add_pipeline_log(
     docs_after_grading: int,
     timings: dict,
 ):
-    """Persist pipeline execution metrics to DB."""
-    log = PipelineLog(
-        tg_id=tg_id,
-        question=question[:1000],
-        rewritten_question=(rewritten_question or "")[:1000],
-        cache_hit=cache_hit,
-        docs_retrieved=docs_retrieved,
-        docs_after_grading=docs_after_grading,
-        t_rewrite=timings.get("rewrite"),
-        t_retrieve=timings.get("retrieve"),
-        t_grade=timings.get("grade"),
-        t_generate=timings.get("generate"),
-        t_total=timings.get("total", 0),
-    )
-    session.add(log)
-    await session.commit()
+    """Persist pipeline execution metrics to DB.
+
+    Opens its own session so it can safely run as a fire-and-forget task
+    without conflicting with the caller's session lifecycle.
+    """
+    async with session_factory() as session:
+        log = PipelineLog(
+            tg_id=tg_id,
+            question=question[:1000],
+            rewritten_question=(rewritten_question or "")[:1000],
+            cache_hit=cache_hit,
+            docs_retrieved=docs_retrieved,
+            docs_after_grading=docs_after_grading,
+            t_rewrite=timings.get("rewrite"),
+            t_retrieve=timings.get("retrieve"),
+            t_grade=timings.get("grade"),
+            t_generate=timings.get("generate"),
+            t_total=timings.get("total", 0),
+        )
+        session.add(log)
+        await session.commit()
 
 
 async def get_analytics_summary(session: AsyncSession, days: int = 7) -> dict:

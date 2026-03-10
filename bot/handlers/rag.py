@@ -217,7 +217,7 @@ def _build_user_filters(onboarding_data: dict) -> dict:
     return filters
 
 
-def _save_suggested(context, db_session, tg_id, suggested: list, msg_id: int = None):
+def _save_suggested(context, db_session_factory, tg_id, suggested: list, msg_id: int = None):
     """Save suggested questions both in-memory and schedule DB persist."""
     # Store globally for legacy buttons and as "latest"
     context.user_data["_suggested_questions"] = suggested
@@ -237,18 +237,19 @@ def _save_suggested(context, db_session, tg_id, suggested: list, msg_id: int = N
                 context.user_data["_message_suggestions"].pop(k, None)
 
     # Persist asynchronously so they survive bot restarts (only globally for now)
-    if suggested and db_session and tg_id:
-        asyncio.create_task(_persist_suggested(db_session, tg_id, suggested))
+    if suggested and db_session_factory and tg_id:
+        asyncio.create_task(_persist_suggested(db_session_factory, tg_id, suggested))
 
 
-async def _persist_suggested(db_session, tg_id: int, suggested: list):
+async def _persist_suggested(session_factory, tg_id: int, suggested: list):
     """Persist suggested questions into journey_state._last_suggested."""
     from bot.db import get_user_memory, update_user_memory
     try:
-        memory = await get_user_memory(db_session, tg_id)
-        state = memory.get("journey_state") or {}
-        state["_last_suggested"] = suggested
-        await update_user_memory(db_session, tg_id, journey_state=state)
+        async with session_factory() as session:
+            memory = await get_user_memory(session, tg_id)
+            state = memory.get("journey_state") or {}
+            state["_last_suggested"] = suggested
+            await update_user_memory(session, tg_id, journey_state=state)
     except Exception:
         logger.warning("Failed to persist suggested questions to DB", exc_info=True)
 
@@ -281,6 +282,7 @@ async def _handle_question_core(
     tg_id: int,
     question: str,
     onboarding_data: dict,
+    db_session_factory=None,
 ):
     """Core logic: memory → rewrite → cache check → retrieve → grade → stream → send.
     
@@ -320,18 +322,20 @@ async def _handle_question_core(
         keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
         await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         if suggested:
-            _save_suggested(context, db_session, tg_id, suggested, msg_id=msg.message_id)
+            _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
         _store_qa(context, msg.message_id, question, clean_text)
         await add_chat_messages(db_session, tg_id, question, clean_text)
-        asyncio.create_task(
-            update_journey_and_summary(simple_rag, db_session, tg_id, question, clean_text)
-        )
+        if db_session_factory:
+            asyncio.create_task(
+                update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
+            )
         timings["total"] = time.monotonic() - pipeline_start
         logger.info("[User %s] Cache hit | %s", tg_id, _fmt_timings(timings))
-        asyncio.create_task(add_pipeline_log(
-            db_session, tg_id, question, actual_question,
-            cache_hit=True, docs_retrieved=0, docs_after_grading=0, timings=timings,
-        ))
+        if db_session_factory:
+            asyncio.create_task(add_pipeline_log(
+                db_session_factory, tg_id, question, actual_question,
+                cache_hit=True, docs_retrieved=0, docs_after_grading=0, timings=timings,
+            ))
         return
 
     # 2. Retrieve candidates
@@ -352,17 +356,18 @@ async def _handle_question_core(
 
         keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
         if suggested:
-            _save_suggested(context, db_session, tg_id, suggested, msg_id=msg.message_id)
+            _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
 
         await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         _store_qa(context, msg.message_id, question, clean_text)
         await add_chat_messages(db_session, tg_id, question, clean_text)
         timings["total"] = time.monotonic() - pipeline_start
         logger.info("[User %s] No relevant docs | %s", tg_id, _fmt_timings(timings))
-        asyncio.create_task(add_pipeline_log(
-            db_session, tg_id, question, actual_question,
-            cache_hit=False, docs_retrieved=0, docs_after_grading=0, timings=timings,
-        ))
+        if db_session_factory:
+            asyncio.create_task(add_pipeline_log(
+                db_session_factory, tg_id, question, actual_question,
+                cache_hit=False, docs_retrieved=0, docs_after_grading=0, timings=timings,
+            ))
         return
 
     context_str = documents_to_context_str(docs)
@@ -390,27 +395,29 @@ async def _handle_question_core(
     keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
     await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
     if suggested:
-        _save_suggested(context, db_session, tg_id, suggested, msg_id=msg.message_id)
+        _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
 
     # Store Q&A for feedback tracking
     _store_qa(context, msg.message_id, question, clean_text)
 
     # 5. Persist conversation + update memory
     await add_chat_messages(db_session, tg_id, question, clean_text)
-    asyncio.create_task(
-        update_journey_and_summary(simple_rag, db_session, tg_id, question, clean_text)
-    )
+    if db_session_factory:
+        asyncio.create_task(
+            update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
+        )
 
     timings["total"] = time.monotonic() - pipeline_start
     logger.info(
         "[User %s] Pipeline complete (%d docs) | %s",
         tg_id, len(docs), _fmt_timings(timings),
     )
-    asyncio.create_task(add_pipeline_log(
-        db_session, tg_id, question, actual_question,
-        cache_hit=False, docs_retrieved=len(docs), docs_after_grading=len(docs),
-        timings=timings,
-    ))
+    if db_session_factory:
+        asyncio.create_task(add_pipeline_log(
+            db_session_factory, tg_id, question, actual_question,
+            cache_hit=False, docs_retrieved=len(docs), docs_after_grading=len(docs),
+            timings=timings,
+        ))
 
 
 @with_db_session()
@@ -441,6 +448,7 @@ async def answer(
             tg_id=update.effective_user.id,
             question=question,
             onboarding_data=context.user_data.get("onboarding", {}),
+            db_session_factory=kwargs.get("db_session_factory"),
         )
     except Exception:
         logger.exception("Error in answer handler")
@@ -479,6 +487,7 @@ async def answer_to_replied(
             tg_id=update.effective_user.id,
             question=question,
             onboarding_data=context.user_data.get("onboarding", {}),
+            db_session_factory=kwargs.get("db_session_factory"),
         )
     except Exception:
         logger.exception("Error in answer_to_replied handler")

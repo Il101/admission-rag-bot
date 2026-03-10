@@ -11,7 +11,6 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from bot.db import get_user_memory, update_user_memory
 
 logger = logging.getLogger(__name__)
@@ -159,7 +158,7 @@ def _truncate_summary(summary: str, max_words: int = 250) -> str:
 
 async def update_journey_and_summary(
     simple_rag,
-    session: AsyncSession,
+    session_factory,
     tg_id: int,
     question: str,
     response: str,
@@ -167,52 +166,52 @@ async def update_journey_and_summary(
     """Update journey state, conversation summary, and mood after a RAG response.
 
     Uses fast keyword-based classification instead of an LLM call.
-    Runs asynchronously — should be awaited after sending the response to the user.
+    Opens its own DB session so it can safely run as a fire-and-forget task.
     """
     try:
-        memory = await get_user_memory(session, tg_id)
-        current_state = memory["journey_state"] or DEFAULT_JOURNEY_STATE.copy()
-        current_summary = memory["conversation_summary"] or "Начало общения."
+        async with session_factory() as session:
+            memory = await get_user_memory(session, tg_id)
+            current_state = memory["journey_state"] or DEFAULT_JOURNEY_STATE.copy()
+            current_summary = memory["conversation_summary"] or "Начало общения."
 
-        # 1. Detect discussed stages from question + response
-        combined_text = f"{question} {response}"
-        newly_discussed = _detect_stages(combined_text)
+            # 1. Detect discussed stages from question + response
+            combined_text = f"{question} {response}"
+            newly_discussed = _detect_stages(combined_text)
 
-        new_state = dict(current_state)
-        for stage_id in newly_discussed:
-            new_state[stage_id] = "discussed"
+            new_state = dict(current_state)
+            for stage_id in newly_discussed:
+                new_state[stage_id] = "discussed"
 
-        # Never downgrade "discussed" back to "pending"
-        for stage in JOURNEY_STAGES:
-            if current_state.get(stage) == "discussed":
-                new_state[stage] = "discussed"
+            # Never downgrade "discussed" back to "pending"
+            for stage in JOURNEY_STAGES:
+                if current_state.get(stage) == "discussed":
+                    new_state[stage] = "discussed"
 
-        # 2. Detect mood
-        user_mood = _detect_mood(question)
-        new_state["_user_mood"] = user_mood
+            # 2. Detect mood
+            user_mood = _detect_mood(question)
+            new_state["_user_mood"] = user_mood
 
-        # 3. Append to summary + periodic LLM compression
-        q_snippet = question[:150].strip()
-        r_snippet = response[:200].strip()
-        new_entry = f"В: {q_snippet} | О: {r_snippet}"
-        new_summary = f"{current_summary}\n{new_entry}"
+            # 3. Append to summary + periodic LLM compression
+            q_snippet = question[:150].strip()
+            r_snippet = response[:200].strip()
+            new_entry = f"В: {q_snippet} | О: {r_snippet}"
+            new_summary = f"{current_summary}\n{new_entry}"
 
-        # Compress with LLM every 5 exchanges to keep summary focused
-        exchange_count = new_summary.count("\nВ: ")
-        if exchange_count >= 5 and exchange_count % 5 == 0 and simple_rag is not None:
-            try:
-                new_summary = await simple_rag.acompress_summary(new_summary)
-            except Exception:
-                logger.warning("LLM summary compression failed, using truncation")
+            # Compress with LLM every 5 exchanges to keep summary focused
+            exchange_count = new_summary.count("\nВ: ")
+            if exchange_count >= 5 and exchange_count % 5 == 0 and simple_rag is not None:
+                try:
+                    new_summary = await simple_rag.acompress_summary(new_summary)
+                except Exception:
+                    logger.warning("LLM summary compression failed, using truncation")
+                    new_summary = _truncate_summary(new_summary)
+            else:
                 new_summary = _truncate_summary(new_summary)
-        else:
-            new_summary = _truncate_summary(new_summary)
 
-        await update_user_memory(session, tg_id, new_state, new_summary)
+            await update_user_memory(session, tg_id, new_state, new_summary)
 
     except Exception:
         logger.exception("Failed to update journey/summary memory")
-        # Non-critical — bot continues working without memory update
 
 
 # ─── Build Memory Context for Prompt ──────────────────────────────
