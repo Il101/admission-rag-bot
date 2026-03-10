@@ -131,6 +131,8 @@ class PipelineLog(Base):
     t_grade: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     t_generate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     t_total: Mapped[float] = mapped_column(Float)
+    sources = Column(JSONB, nullable=True)   # list of source_url strings from retrieved docs
+    error = Column(Text, nullable=True)       # exception message if pipeline failed
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -260,6 +262,8 @@ async def add_pipeline_log(
     docs_retrieved: int,
     docs_after_grading: int,
     timings: dict,
+    sources: list | None = None,
+    error: str | None = None,
 ):
     """Persist pipeline execution metrics to DB.
 
@@ -279,9 +283,74 @@ async def add_pipeline_log(
             t_grade=timings.get("grade"),
             t_generate=timings.get("generate"),
             t_total=timings.get("total", 0),
+            sources=sources or [],
+            error=error,
         )
         session.add(log)
         await session.commit()
+
+
+async def get_full_report_data(session: AsyncSession, days: int = 7) -> dict:
+    """Return raw rows for users, feedback and pipeline logs for a detailed report."""
+    from datetime import timedelta
+
+    cutoff = datetime.now() - timedelta(days=days)
+
+    users_rows = (await session.execute(
+        select(User).order_by(User.created_at.desc())
+    )).scalars().all()
+
+    feedback_rows = (await session.execute(
+        select(Feedback).where(Feedback.created_at >= cutoff).order_by(Feedback.created_at.desc())
+    )).scalars().all()
+
+    pipeline_rows = (await session.execute(
+        select(PipelineLog).where(PipelineLog.created_at >= cutoff).order_by(PipelineLog.created_at.desc())
+    )).scalars().all()
+
+    return {
+        "users": [
+            {
+                "tg_id": u.tg_id,
+                "country": u.country,
+                "target_level": u.target_level,
+                "german_level": u.german_level,
+                "english_level": u.english_level,
+                "created_at": u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "",
+                "last_active": u.last_active.strftime("%Y-%m-%d %H:%M") if u.last_active else "",
+            }
+            for u in users_rows
+        ],
+        "feedback": [
+            {
+                "tg_id": f.tg_id,
+                "rating": "👍" if f.rating == 1 else "👎",
+                "question": f.question,
+                "answer": f.answer,
+                "created_at": f.created_at.strftime("%Y-%m-%d %H:%M") if f.created_at else "",
+            }
+            for f in feedback_rows
+        ],
+        "pipeline_logs": [
+            {
+                "tg_id": p.tg_id,
+                "question": p.question,
+                "rewritten": p.rewritten_question,
+                "cache_hit": p.cache_hit,
+                "docs_retrieved": p.docs_retrieved,
+                "docs_graded": p.docs_after_grading,
+                "sources": ", ".join(p.sources) if p.sources else "",
+                "error": p.error or "",
+                "t_rewrite": p.t_rewrite,
+                "t_retrieve": p.t_retrieve,
+                "t_grade": p.t_grade,
+                "t_generate": p.t_generate,
+                "t_total": p.t_total,
+                "created_at": p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else "",
+            }
+            for p in pipeline_rows
+        ],
+    }
 
 
 async def get_analytics_summary(session: AsyncSession, days: int = 7) -> dict:

@@ -26,12 +26,14 @@ async def run_migration():
     engine = create_async_engine(url)
     try:
         async with engine.begin() as conn:
-            logger.info("Adding 'english_level' column to 'users' table...")
+            logger.info("Running migrations...")
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS english_level TEXT;"))
-            logger.info("✅ Migration successful!")
+            await conn.execute(text("ALTER TABLE pipeline_logs ADD COLUMN IF NOT EXISTS sources JSONB;"))
+            await conn.execute(text("ALTER TABLE pipeline_logs ADD COLUMN IF NOT EXISTS error TEXT;"))
+            logger.info("✅ Migrations successful!")
     except Exception as e:
         if "already exists" in str(e).lower():
-            logger.info("✅ Column 'english_level' already exists.")
+            logger.info("✅ Columns already exist.")
         else:
             logger.error(f"❌ Migration failed: {e}")
     finally:

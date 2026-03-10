@@ -19,5 +19,6 @@ if [ -z "$POSTGRES_HOST" ]; then
 fi
 
 python3 init_scripts/init_bot_db.py
+python3 -m bot.migrate
 python3 init_scripts/index_knowledge_base.py
 python3 bot/app.py

@@ -290,6 +290,10 @@ async def _handle_question_core(
     """
     timings = {}
     pipeline_start = time.monotonic()
+    # Defaults so the except block can always reference them
+    actual_question = question
+    retrieved_count = 0
+    doc_sources: list = []
 
     # Always restore onboarding from DB if lost after bot restart
     onboarding_data = await _ensure_onboarding_loaded(context, db_session, tg_id)
@@ -304,120 +308,141 @@ async def _handle_question_core(
         text="🔍 Ищу информацию...",
     )
 
-    # 1. Rewrite query for better vector search (resolves anaphora, adds keywords)
-    t0 = time.monotonic()
-    actual_question = await simple_rag.arewrite_query(
-        question, chat_history_str, memory_context_str
-    )
-    timings["rewrite"] = time.monotonic() - t0
+    try:
+        # 1. Rewrite query for better vector search (resolves anaphora, adds keywords)
+        t0 = time.monotonic()
+        actual_question = await simple_rag.arewrite_query(
+            question, chat_history_str, memory_context_str
+        )
+        timings["rewrite"] = time.monotonic() - t0
 
-    # 1a. Check semantic answer cache
-    t0 = time.monotonic()
-    cached_response = await simple_rag.get_cached_answer(actual_question)
-    timings["cache_check"] = time.monotonic() - t0
+        # 1a. Check semantic answer cache
+        t0 = time.monotonic()
+        cached_response = await simple_rag.get_cached_answer(actual_question)
+        timings["cache_check"] = time.monotonic() - t0
 
-    if cached_response:
-        clean_text, suggested = parse_suggested_buttons(cached_response)
+        if cached_response:
+            clean_text, suggested = parse_suggested_buttons(cached_response)
+            safe_text = sanitize_telegram_html(clean_text)
+            keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
+            await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            if suggested:
+                _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
+            _store_qa(context, msg.message_id, question, clean_text)
+            await add_chat_messages(db_session, tg_id, question, clean_text)
+            if db_session_factory:
+                asyncio.create_task(
+                    update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
+                )
+            timings["total"] = time.monotonic() - pipeline_start
+            logger.info("[User %s] Cache hit | %s", tg_id, _fmt_timings(timings))
+            if db_session_factory:
+                asyncio.create_task(add_pipeline_log(
+                    db_session_factory, tg_id, question, actual_question,
+                    cache_hit=True, docs_retrieved=0, docs_after_grading=0, timings=timings,
+                ))
+            return
+
+        # 2. Retrieve candidates
+        t0 = time.monotonic()
+        user_filters = _build_user_filters(onboarding_data)
+        docs = await simple_rag.aretrieve(actual_question, user_filters=user_filters)
+        retrieved_count = len(docs)
+        timings["retrieve"] = time.monotonic() - t0
+
+        # 3. Grade for relevance (CRAG filtering)
+        t0 = time.monotonic()
+        docs = await simple_rag.agrade_documents(actual_question, docs)
+        timings["grade"] = time.monotonic() - t0
+
+        # Collect source URLs from surviving docs for the pipeline log
+        doc_sources = [
+            doc.metadata.get("source_url", "") for doc in docs
+            if doc.metadata.get("source_url")
+        ]
+
+        if len(docs) == 0:
+            giveup_text = "К сожалению, я не смог найти релевантную информацию по этому запросу. 😔"
+            clean_text, suggested = parse_suggested_buttons(giveup_text)
+            safe_text = sanitize_telegram_html(clean_text)
+
+            keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
+            if suggested:
+                _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
+
+            await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            _store_qa(context, msg.message_id, question, clean_text)
+            await add_chat_messages(db_session, tg_id, question, clean_text)
+            timings["total"] = time.monotonic() - pipeline_start
+            logger.info("[User %s] No relevant docs | %s", tg_id, _fmt_timings(timings))
+            if db_session_factory:
+                asyncio.create_task(add_pipeline_log(
+                    db_session_factory, tg_id, question, actual_question,
+                    cache_hit=False, docs_retrieved=retrieved_count, docs_after_grading=0,
+                    timings=timings, sources=[],
+                ))
+            return
+
+        context_str = documents_to_context_str(docs)
+
+        # 4. Stream answer
+        t0 = time.monotonic()
+        full_response = await _stream_answer(
+            msg, simple_rag, actual_question, context_str,
+            chat_history_str, memory_context_str,
+        )
+        timings["generate"] = time.monotonic() - t0
+
+        # Cache answer for future similar questions
+        asyncio.create_task(simple_rag.cache_answer(actual_question, full_response))
+
+        clean_text, suggested = parse_suggested_buttons(full_response)
+
+        sources_text = docs_to_sources_str(docs)
+        if sources_text:
+            clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
+
         safe_text = sanitize_telegram_html(clean_text)
+
+        # Combined keyboard: suggested questions + feedback (👍/👎)
         keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
         await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         if suggested:
             _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
+
+        # Store Q&A for feedback tracking
         _store_qa(context, msg.message_id, question, clean_text)
+
+        # 5. Persist conversation + update memory
         await add_chat_messages(db_session, tg_id, question, clean_text)
         if db_session_factory:
             asyncio.create_task(
                 update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
             )
+
         timings["total"] = time.monotonic() - pipeline_start
-        logger.info("[User %s] Cache hit | %s", tg_id, _fmt_timings(timings))
-        if db_session_factory:
-            asyncio.create_task(add_pipeline_log(
-                db_session_factory, tg_id, question, actual_question,
-                cache_hit=True, docs_retrieved=0, docs_after_grading=0, timings=timings,
-            ))
-        return
-
-    # 2. Retrieve candidates
-    t0 = time.monotonic()
-    user_filters = _build_user_filters(onboarding_data)
-    docs = await simple_rag.aretrieve(actual_question, user_filters=user_filters)
-    timings["retrieve"] = time.monotonic() - t0
-
-    # 3. Grade for relevance (CRAG filtering)
-    t0 = time.monotonic()
-    docs = await simple_rag.agrade_documents(actual_question, docs)
-    timings["grade"] = time.monotonic() - t0
-
-    if len(docs) == 0:
-        giveup_text = "К сожалению, я не смог найти релевантную информацию по этому запросу. 😔"
-        clean_text, suggested = parse_suggested_buttons(giveup_text)
-        safe_text = sanitize_telegram_html(clean_text)
-
-        keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
-        if suggested:
-            _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
-
-        await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-        _store_qa(context, msg.message_id, question, clean_text)
-        await add_chat_messages(db_session, tg_id, question, clean_text)
-        timings["total"] = time.monotonic() - pipeline_start
-        logger.info("[User %s] No relevant docs | %s", tg_id, _fmt_timings(timings))
-        if db_session_factory:
-            asyncio.create_task(add_pipeline_log(
-                db_session_factory, tg_id, question, actual_question,
-                cache_hit=False, docs_retrieved=0, docs_after_grading=0, timings=timings,
-            ))
-        return
-
-    context_str = documents_to_context_str(docs)
-    
-    # 4. Stream answer
-    t0 = time.monotonic()
-    full_response = await _stream_answer(
-        msg, simple_rag, actual_question, context_str,
-        chat_history_str, memory_context_str,
-    )
-    timings["generate"] = time.monotonic() - t0
-
-    # Cache answer for future similar questions
-    asyncio.create_task(simple_rag.cache_answer(actual_question, full_response))
-
-    clean_text, suggested = parse_suggested_buttons(full_response)
-
-    sources_text = docs_to_sources_str(docs)
-    if sources_text:
-        clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
-
-    safe_text = sanitize_telegram_html(clean_text)
-
-    # Combined keyboard: suggested questions + feedback (👍/👎)
-    keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
-    await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-    if suggested:
-        _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
-
-    # Store Q&A for feedback tracking
-    _store_qa(context, msg.message_id, question, clean_text)
-
-    # 5. Persist conversation + update memory
-    await add_chat_messages(db_session, tg_id, question, clean_text)
-    if db_session_factory:
-        asyncio.create_task(
-            update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
+        logger.info(
+            "[User %s] Pipeline complete (%d docs) | %s",
+            tg_id, len(docs), _fmt_timings(timings),
         )
+        if db_session_factory:
+            asyncio.create_task(add_pipeline_log(
+                db_session_factory, tg_id, question, actual_question,
+                cache_hit=False, docs_retrieved=retrieved_count, docs_after_grading=len(docs),
+                timings=timings, sources=doc_sources,
+            ))
 
-    timings["total"] = time.monotonic() - pipeline_start
-    logger.info(
-        "[User %s] Pipeline complete (%d docs) | %s",
-        tg_id, len(docs), _fmt_timings(timings),
-    )
-    if db_session_factory:
-        asyncio.create_task(add_pipeline_log(
-            db_session_factory, tg_id, question, actual_question,
-            cache_hit=False, docs_retrieved=len(docs), docs_after_grading=len(docs),
-            timings=timings,
-        ))
+    except Exception as exc:
+        timings["total"] = time.monotonic() - pipeline_start
+        err_str = f"{type(exc).__name__}: {exc}"
+        logger.exception("[User %s] Pipeline error: %s", tg_id, err_str)
+        if db_session_factory:
+            asyncio.create_task(add_pipeline_log(
+                db_session_factory, tg_id, question, actual_question,
+                cache_hit=False, docs_retrieved=retrieved_count, docs_after_grading=0,
+                timings=timings, sources=doc_sources, error=err_str,
+            ))
+        raise
 
 
 @with_db_session()

@@ -1,11 +1,14 @@
+import csv
+import io
 import logging
+import zipfile
 
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from bot.decorators import with_db_session, admin_only
-from bot.db import delete_user_data, get_analytics_summary, get_feedback_stats, Feedback
+from bot.db import delete_user_data, get_analytics_summary, get_feedback_stats, get_full_report_data, Feedback
 
 logger = logging.getLogger(__name__)
 
@@ -117,3 +120,36 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE, db_ses
         text=text,
         parse_mode=ParseMode.HTML,
     )
+
+    # Build ZIP with detailed CSVs
+    try:
+        report = await get_full_report_data(db_session, days=days)
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for sheet_name, rows in (
+                ("users", report["users"]),
+                ("feedback", report["feedback"]),
+                ("pipeline_logs", report["pipeline_logs"]),
+            ):
+                if not rows:
+                    continue
+                csv_buf = io.StringIO()
+                writer = csv.DictWriter(csv_buf, fieldnames=rows[0].keys())
+                writer.writeheader()
+                writer.writerows(rows)
+                zf.writestr(f"{sheet_name}.csv", csv_buf.getvalue())
+        zip_buf.seek(0)
+        from datetime import date
+        filename = f"stats_{date.today().isoformat()}_last{days}d.zip"
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=zip_buf,
+            filename=filename,
+            caption=f"📎 Подробный отчёт за {days} дней",
+        )
+    except Exception as e:
+        logger.exception("Failed to build report ZIP")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"⚠️ Не удалось сформировать файл отчёта: {e}",
+        )
