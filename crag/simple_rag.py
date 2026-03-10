@@ -175,7 +175,11 @@ def documents_to_context_str(docs: List[Document]) -> str:
 
 
 async def retry_on_503(coro_func, *args, max_retries=3, initial_delay=1, **kwargs):
-    """Simple exponential backoff retry for 503/429 errors."""
+    """Simple exponential backoff retry for transient Gemini API errors.
+
+    Retries on 503/429 (server overload) and connection-level failures
+    (DNS resolution, TCP timeouts) that are common on Railway.
+    """
     for attempt in range(max_retries):
         try:
             return await coro_func(*args, **kwargs)
@@ -183,8 +187,14 @@ async def retry_on_503(coro_func, *args, max_retries=3, initial_delay=1, **kwarg
             err_msg = str(e).lower()
             is_503 = "503" in err_msg or "unavailable" in err_msg
             is_429 = "429" in err_msg or "exhausted" in err_msg
+            is_conn = (
+                "clientconnector" in err_msg
+                or "dns" in err_msg
+                or "timed out" in err_msg
+                or "connectionerror" in err_msg
+            )
 
-            if is_503 or is_429:
+            if is_503 or is_429 or is_conn:
                 if attempt == max_retries - 1:
                     raise
                 delay = initial_delay * (2 ** attempt)

@@ -296,11 +296,15 @@ async def index():
             "ON simple_documents USING GIN (metadata)"
         ))
         
-        # HNSW index for fast approximate nearest-neighbor vector search
+        # Ensure embedding column has explicit dimensions
         conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_simple_documents_embedding_hnsw "
-            "ON simple_documents USING hnsw (embedding vector_cosine_ops) "
-            "WITH (m = 16, ef_construction = 64)"
+            "ALTER TABLE simple_documents "
+            "ALTER COLUMN embedding TYPE vector(3072)"
+        ))
+        
+        # Drop legacy HNSW index (pgvector 2000-dim limit makes it unusable for 3072-d)
+        conn.execute(text(
+            "DROP INDEX IF EXISTS idx_simple_documents_embedding_hnsw"
         ))
         
         # Full-text search index for hybrid retrieval (BM25-like)
@@ -312,6 +316,10 @@ async def index():
         
         # Check if table has data. Even if hash matches, table might be empty
         count = conn.execute(text("SELECT count(*) FROM simple_documents")).scalar()
+
+    # NOTE: pgvector HNSW/IVFFlat indexes are limited to 2000 dims, and
+    # Railway's pgvector doesn't support halfvec.  For a small knowledge base
+    # the exact sequential scan is fast enough (~0.4 s including network).
 
     if old_hash == current_hash and count > 0:
         logger.info("✅ Knowledge base is unchanged since last deployment. Skipping indexing to save API limits.")

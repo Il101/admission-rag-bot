@@ -22,7 +22,7 @@ def with_db_session(session_param_name="db_session"):
             async with db_session_factory() as session:
                 kwargs[session_param_name] = session
                 kwargs["db_session_factory"] = db_session_factory
-                await handler(*args, **kwargs)
+                await handler(*args, **_strip_extra(handler, kwargs))
 
         return wrapper
 
