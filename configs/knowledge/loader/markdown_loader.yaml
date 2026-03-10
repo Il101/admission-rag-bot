@@ -1,3 +1,0 @@
-_target_: crag.knowledge.loaders.markdown_loader.load
-_partial_: True
-directory_path: "knowledge_base"

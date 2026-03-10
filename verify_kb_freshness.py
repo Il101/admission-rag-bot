@@ -9,10 +9,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "init_scripts"))
+from index_knowledge_base import parse_frontmatter, split_markdown
+
+
 from pydantic import BaseModel, Field
 
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
+
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -39,26 +47,30 @@ MODEL_NAME = "gemini-3-flash-preview"
 class VerificationResult(BaseModel):
     status: str = Field(description="Must be exactly 'UP_TO_DATE', 'NEEDS_UPDATE', or 'ERROR'")
     changes_detected: list[str] = Field(description="List of factual differences found (e.g. deadline changed from X to Y). Empty if UP_TO_DATE.")
+    additions_suggested: list[str] = Field(description="Valuable information present on the website but missing from the Markdown that would make it more informative.")
+    deletions_suggested: list[str] = Field(description="Information present in the Markdown that is misleading, incorrect, or contradicts the website and should be removed.")
     confidence: int = Field(description="Confidence score in the assessment from 1 to 100")
     reasoning: str = Field(description="Brief explanation of why this verdict was reached")
 
 
 system_instruction = """
-Ты — старший эксперт-аудитор австрийских образовательных программ.
-Твоя задача — проверить, не устарела ли информация в нашей базе данных (Markdown файл) 
-по сравнению с актуальным текстом, который мы только что скачали с официального сайта университета (Website Text).
+Ты — старший эксперт-аудитор и редактор базы знаний по австрийским образовательным программам.
+Твоя задача — не просто проверить базовую актуальность, но и глубоко проанализировать локальную базу данных (Markdown файл) по сравнению с текстом скачанным с официального сайта университета (Website Text).
+Документ может быть разбит на несколько секций, каждая из которых имеет свой URL-источник на сайте университета.
 
 ИНСТРУКЦИЯ:
-1. Внимательно прочитай локальный Markdown-файл.
-2. Прочитай сырой текст с веб-сайта.
-3. Сравни факты, обращая особое внимание на:
-   - Дедлайны (сроки подачи документов)
-   - Цены и пошлины (ÖH-Beitrag, Tuition Fees)
-   - Требования к языку (какие сертификаты нужны, какой уровень)
-   - Списки вступительных экзаменов или процедур отбора
-4. ЕСЛИ на сайте есть новая, противоречащая информация — статус NEEDS_UPDATE.
-5. ЕСЛИ сайт содержит меньше информации, чем Markdown (например, специфичные детали убрали в PDF), но нет прямых противоречий — статус UP_TO_DATE.
-6. ЕСЛИ всё совпадает (или сайт просто подтверждает наши данные) — статус UP_TO_DATE.
+1. Внимательно прочитай предоставленные секции локального Markdown-файла и соответствующие им тексты с веб-сайта.
+2. Сравни факты, обращая особое внимание на дедлайны, цены, требования к языку и вступительные экзамены.
+3. ОПРЕДЕЛЕНИЕ СТАТУСА:
+   - ЕСЛИ найдена прямо противоречащая, устаревшая информация (например, изменился дедлайн) -> статус NEEDS_UPDATE. Заполняй `changes_detected`.
+   - ЕСЛИ в Markdown есть информация, которая откровенно вводит в заблуждение или опровергается сайтом -> статус NEEDS_UPDATE. Заполняй `deletions_suggested`.
+   - ЕСЛИ на сайте есть полезная, критически важная новая информация, которой не хватает в Markdown (и она сделает базу информативнее) -> статус NEEDS_UPDATE. Заполняй `additions_suggested`.
+   - ЕСЛИ в Markdown информация просто более подробная (справочная), а сайт содержит краткую выжимку, НО нет прямых противоречий -> статус UP_TO_DATE.
+   - ЕСЛИ всё совпадает идеально, либо сайт просто подтверждает наши данные -> статус UP_TO_DATE.
+4. ЗАПОЛНЕНИЕ ПОЛЕЙ:
+   - changes_detected: Только факты, которые изменились (было X, стало Y).
+   - additions_suggested: Что стоит ДОБАВИТЬ в Markdown, так как это есть на сайте и важно для абитуриента.
+   - deletions_suggested: Что стоит УДАЛИТЬ из Markdown, так как это неверно, вводит в заблуждение или больше не актуально по данным сайта.
 """
 
 async def fetch_url_text(url: str, session: aiohttp.ClientSession) -> str:
@@ -69,6 +81,7 @@ async def fetch_url_text(url: str, session: aiohttp.ClientSession) -> str:
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate", # Prevent Brotli ('br') encoding which aiohttp struggles with natively
         }
         # Disable SSL verification for misconfigured university servers if needed
         async with session.get(url, headers=headers, ssl=False, timeout=15) as response:
@@ -95,9 +108,8 @@ async def verify_document(file_path: str, client: genai.Client, session: aiohttp
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Extract frontmatter
-        match = re.search(r"^---\n(.*?)\n---\n(.*)", content, re.DOTALL)
-        if not match:
+        file_metadata, markdown_body = parse_frontmatter(content)
+        if not file_metadata:
             return file_path, VerificationResult(
                 status="ERROR", 
                 changes_detected=["No YAML frontmatter found"], 
@@ -105,16 +117,19 @@ async def verify_document(file_path: str, client: genai.Client, session: aiohttp
                 reasoning="Invalid file format"
             )
 
-        frontmatter_str = match.group(1)
-        markdown_body = match.group(2).strip()
+        file_metadata["source"] = os.path.basename(file_path)
+        chunks = split_markdown(markdown_body, file_metadata)
+        
+        chunks_by_url = {}
+        for chunk in chunks:
+            url = chunk["metadata"].get("source_url", "")
+            if url:
+                url = url.split('#')[0].split('|')[0].strip() # Clean inline comments or multiple URLs
+                if url not in chunks_by_url:
+                    chunks_by_url[url] = []
+                chunks_by_url[url].append(chunk)
 
-        try:
-            metadata = yaml.safe_load(frontmatter_str)
-        except Exception as e:
-            return file_path, VerificationResult(status="ERROR", changes_detected=[str(e)], confidence=0, reasoning="YAML parse error")
-
-        source_url_raw = metadata.get("source_url", "")
-        if not source_url_raw or "example.at" in source_url_raw:
+        if not chunks_by_url:
             return file_path, VerificationResult(
                 status="UP_TO_DATE", 
                 changes_detected=[], 
@@ -122,37 +137,44 @@ async def verify_document(file_path: str, client: genai.Client, session: aiohttp
                 reasoning="No valid source_url to check"
             )
 
-        # Handle multiple URLs separated by |
-        urls = [u.strip() for u in source_url_raw.split("|")]
-        if not urls:
-            return file_path, VerificationResult(status="ERROR", changes_detected=[], confidence=0, reasoning="Empty source_url")
-
-        # Fetch all URLs
-        logger.info(f"[{os.path.basename(file_path)}] Fetching {len(urls)} URLs...")
-        live_texts = []
-        for u in urls:
-            # remove inline comments
-            u = u.split('#')[0].strip()
-            text = await fetch_url_text(u, session)
-            live_texts.append(f"--- SOURCE: {u} ---\n{text}\n")
+        logger.info(f"[{os.path.basename(file_path)}] Fetching {len(chunks_by_url)} unique URLs...")
+        url_sections = []
+        for url, url_chunks in chunks_by_url.items():
+            if not url or "example.at" in url:
+                continue
+            text = await fetch_url_text(url, session)
+            local_text = "\n\n".join(c["content"] for c in url_chunks)
             
-        full_live_text = "\n".join(live_texts)
+            section = f"--- URL: {url} ---\nLOCAL MARKDOWN CONTENT SPECIFIC TO THIS URL:\n{local_text}\n\nLIVE WEBSITE TEXT FROM THIS URL:\n{text}\n\n"
+            url_sections.append(section)
+
+        if not url_sections:
+            return file_path, VerificationResult(
+                status="UP_TO_DATE", 
+                changes_detected=[], 
+                confidence=100, 
+                reasoning="No valid URLs to check"
+            )
 
         # Call Gemini
-        logger.info(f"[{os.path.basename(file_path)}] Asking Gemini to verify...")
+        logger.info(f"[{os.path.basename(file_path)}] Asking Gemini to verify across {len(url_sections)} URLs...")
         
         prompt = f"""
-        LOCAL MARKDOWN DOCUMENT:
-        ========================
-        {markdown_body}
+        We have broken down the local document into sections based on their source URLs.
+        Please compare the local content for each URL against the live website text for that specific URL.
         
-        LIVE WEBSITE TEXT:
-        ==================
-        {full_live_text}
+        {''.join(url_sections)}
         """
         
-        try:
-            response = await client.aio.models.generate_content(
+        # Define a retryable inner function for the Gemini call
+        @retry(
+            stop=stop_after_attempt(5),
+            wait=wait_exponential(multiplier=2, min=4, max=60),
+            retry=retry_if_exception_type(APIError),
+            before_sleep=before_sleep_log(logger, logging.WARNING)
+        )
+        async def call_gemini():
+            res = await client.aio.models.generate_content(
                 model=MODEL_NAME,
                 contents=prompt,
                 config=types.GenerateContentConfig(
@@ -162,7 +184,10 @@ async def verify_document(file_path: str, client: genai.Client, session: aiohttp
                     temperature=0.1 # Low temp for factual consistency
                 )
             )
-            result = VerificationResult.model_validate_json(response.text)
+            return VerificationResult.model_validate_json(res.text)
+
+        try:
+            result = await call_gemini()
             return file_path, result
         except Exception as e:
             return file_path, VerificationResult(
@@ -180,10 +205,17 @@ async def main():
 
     # Find all MD files
     md_files = []
+    
+    # Optional file filter from CLI
+    import sys
+    filter_files = sys.argv[1:]
+
     for root, _, files in os.walk(kb_dir):
         for f in files:
             if f.endswith(".md") and not f.startswith("_"):
                 if f in ("README.md", "schema.yaml"):
+                    continue
+                if filter_files and not any(filter_name in f for filter_name in filter_files):
                     continue
                 md_files.append(os.path.join(root, f))
                 
@@ -224,10 +256,14 @@ async def main():
         # Console output
         print(f"\n{color_start}{icon} {fname} [{result.status}]{color_end} (Confidence: {result.confidence}%)")
         print(f"   Reasoning: {result.reasoning}")
-        if result.changes_detected:
-            print("   Detected Changes:")
+        if result.changes_detected or result.additions_suggested or result.deletions_suggested:
+            print("   Issues Found:")
             for change in result.changes_detected:
-                print(f"     - {change}")
+                print(f"     - [CHANGE] {change}")
+            for add in result.additions_suggested:
+                print(f"     - [ADD] {add}")
+            for dele in result.deletions_suggested:
+                print(f"     - [DELETE] {dele}")
                 
         # Markdown File output
         report_lines.append(f"## {icon} {fname} `{result.status}` (Confidence: {result.confidence}%)")
@@ -235,7 +271,15 @@ async def main():
         if result.changes_detected:
             report_lines.append("**Detected Changes:**")
             for change in result.changes_detected:
-                report_lines.append(f"- {change}")
+                report_lines.append(f"- [CHANGE] {change}")
+        if result.additions_suggested:
+            report_lines.append("**Suggested Additions:**")
+            for add in result.additions_suggested:
+                report_lines.append(f"- [ADD] {add}")
+        if result.deletions_suggested:
+            report_lines.append("**Suggested Deletions:**")
+            for dele in result.deletions_suggested:
+                report_lines.append(f"- [DELETE] {dele}")
         report_lines.append("---\n")
                 
     with open("kb_audit_report.md", "w", encoding="utf-8") as f:

@@ -12,7 +12,7 @@ from telegram.error import BadRequest, RetryAfter
 from bot.decorators import filter_banned, with_db_session
 from bot.keyboards import suggested_questions_keyboard
 from bot.utils import docs_to_sources_str, make_html_quote, remove_bot_command, sanitize_telegram_html
-from bot.db import get_context_messages, add_chat_messages, get_user_memory
+from bot.db import get_context_messages, add_chat_messages, get_user_memory, get_user
 from bot.memory import (
     build_memory_context,
     get_current_date,
@@ -156,22 +156,32 @@ async def _stream_answer(
     return accumulated
 
 
-async def _send_response(context, chat_id, reply_to_id, text, suggested, user_data):
-    """Send response with suggested question buttons (LLM-generated only)."""
-    keyboard = None
-    if suggested:
-        keyboard = suggested_questions_keyboard(suggested)
-        user_data["_suggested_questions"] = suggested
+async def _ensure_onboarding_loaded(context, db_session, tg_id: int) -> dict:
+    """Lazy-load user profile from DB into context.user_data['onboarding'].
+    
+    context.user_data is in-memory and is lost on bot restart.
+    This restores it transparently from the DB on the first request after restart.
+    """
+    onboarding = context.user_data.get("onboarding", {})
+    # If already populated (typical case during same session), return immediately
+    if onboarding.get("targetLevel") or onboarding.get("germanLevel"):
+        return onboarding
 
-    safe_text = sanitize_telegram_html(text)
-
-    await context.bot.send_message(
-        chat_id=chat_id,
-        reply_to_message_id=reply_to_id,
-        text=safe_text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=keyboard,
-    )
+    # Load from DB and map snake_case column names → camelCase keys used in code
+    user = await get_user(db_session, tg_id)
+    if user:
+        onboarding = {
+            "countryScope": user.country or "RU",
+            "document": user.document_type,
+            "targetLevel": user.target_level,
+            "germanLevel": user.german_level,
+            "englishLevel": user.english_level,
+        }
+        # Remove None values so .get() checks still work cleanly
+        onboarding = {k: v for k, v in onboarding.items() if v is not None}
+        context.user_data["onboarding"] = onboarding
+        logger.info(f"[User {tg_id}] Restored onboarding profile from DB: {onboarding}")
+    return onboarding
 
 
 async def _load_memory(db_session, tg_id, onboarding_data):
@@ -207,11 +217,27 @@ def _build_user_filters(onboarding_data: dict) -> dict:
     return filters
 
 
-def _save_suggested(context, db_session, tg_id, suggested: list):
+def _save_suggested(context, db_session, tg_id, suggested: list, msg_id: int = None):
     """Save suggested questions both in-memory and schedule DB persist."""
+    # Store globally for legacy buttons and as "latest"
     context.user_data["_suggested_questions"] = suggested
-    # Persist asynchronously so they survive bot restarts
-    if suggested:
+    
+    # Store specifically for this message if ID is provided
+    if msg_id:
+        # Use a dict to store multiple recent suggestion sets
+        if "_message_suggestions" not in context.user_data:
+            context.user_data["_message_suggestions"] = {}
+        
+        context.user_data["_message_suggestions"][msg_id] = suggested
+        
+        # Simple cleanup: keep only last 10 messages' suggestions to save memory
+        if len(context.user_data["_message_suggestions"]) > 10:
+            oldest_keys = sorted(context.user_data["_message_suggestions"].keys())[:-10]
+            for k in oldest_keys:
+                context.user_data["_message_suggestions"].pop(k, None)
+
+    # Persist asynchronously so they survive bot restarts (only globally for now)
+    if suggested and db_session and tg_id:
         asyncio.create_task(_persist_suggested(db_session, tg_id, suggested))
 
 
@@ -241,6 +267,9 @@ async def _handle_question_core(
     
     Shared by answer(), answer_to_replied(), and handle_suggested_question().
     """
+    # Always restore onboarding from DB if lost after bot restart
+    onboarding_data = await _ensure_onboarding_loaded(context, db_session, tg_id)
+
     memory, chat_history_str, memory_context_str = await _load_memory(
         db_session, tg_id, onboarding_data
     )
@@ -295,10 +324,17 @@ async def _handle_question_core(
 
     keyboard = None
     if suggested:
+        # Initial keyboard (no ID yet)
         keyboard = suggested_questions_keyboard(suggested)
         _save_suggested(context, db_session, tg_id, suggested)
 
     await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+    # If we have a final message with suggestions, re-bind them with message ID
+    if suggested:
+        new_keyboard = suggested_questions_keyboard(suggested, msg_id=msg.message_id)
+        await msg.edit_reply_markup(reply_markup=new_keyboard)
+        _save_suggested(context, None, None, suggested, msg_id=msg.message_id)
 
     # 5. Persist conversation + update memory (fire-and-forget — doesn't delay response)
     await add_chat_messages(db_session, tg_id, question, clean_text)
@@ -379,7 +415,7 @@ async def answer_to_replied(
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             reply_to_message_id=update.effective_message.reply_to_message.id,
-            text="⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйста попробуйте позже.",
+            text="⚠️ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.",
         )
 
 

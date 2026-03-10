@@ -24,12 +24,27 @@ def build_suggested_handler(simple_rag, db_session):
         await query.answer()
 
         try:
-            idx = int(query.data.split("_")[1])
+            data_parts = query.data.split("_")
+            if data_parts[0] == "sq":
+                # New format: sq_{msg_id}_{idx}
+                msg_id = int(data_parts[1])
+                idx = int(data_parts[2])
+            else:
+                # Legacy format: suggest_{idx}
+                msg_id = None
+                idx = int(data_parts[1])
         except (IndexError, ValueError):
             return
 
-        # Try in-memory first (fastest path)
-        suggested_questions = context.user_data.get("_suggested_questions", [])
+        # Try message-specific lookup first
+        suggested_questions = []
+        if msg_id:
+            msg_suggestions = context.user_data.get("_message_suggestions", {})
+            suggested_questions = msg_suggestions.get(msg_id, [])
+
+        # Fall back to global in-memory (latest response)
+        if not suggested_questions:
+            suggested_questions = context.user_data.get("_suggested_questions", [])
 
         # Fall back to DB if user_data was lost (e.g. after bot restart)
         if not suggested_questions:

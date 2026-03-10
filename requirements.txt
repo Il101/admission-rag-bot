@@ -6,22 +6,20 @@ hydra-core==1.3.2
 omegaconf==2.3.0
 pydantic==2.8.2
 tenacity==8.5.0
+Jinja2>=3.1.0
 
 # Database
 SQLAlchemy==2.0.31
 psycopg==3.2.1
 psycopg-binary==3.2.1
 psycopg-pool==3.2.2
+asyncpg>=0.29.0
 pgvector==0.2.5
 
-# RAG & AI Orchestration
-
-# Search & Vector Stores
-
-# Cloud LLM Adapters
+# LLM / Embeddings
 google-genai
-openai==1.40.3
-tiktoken==0.7.0
+google-api-core
+
 # Document Parsing
 beautifulsoup4==4.12.3
 lxml==5.2.2

@@ -68,13 +68,17 @@ def build_cmd_start(db_session):
 
             # Suggest buttons based on undiscussed stages
             starter_questions = get_fallback_buttons(journey_state)
-            context.user_data["_suggested_questions"] = starter_questions
-            keyboard = suggested_questions_keyboard(starter_questions)
             
             if update.message:
-                await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+                sent_msg = await update.message.reply_text(text, parse_mode='HTML')
             elif update.callback_query:
-                await update.callback_query.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+                sent_msg = await update.callback_query.message.reply_text(text, parse_mode='HTML')
+            
+            if sent_msg:
+                from bot.handlers.rag import _save_suggested
+                keyboard = suggested_questions_keyboard(starter_questions, msg_id=sent_msg.message_id)
+                await sent_msg.edit_reply_markup(reply_markup=keyboard)
+                _save_suggested(context, None, None, starter_questions, msg_id=sent_msg.message_id)
             
             return ConversationHandler.END
 
@@ -183,9 +187,13 @@ def build_english_level_handler(db_session):
             "С чего начнём? 👇"
         )
 
-        context.user_data["_suggested_questions"] = starter_questions
-        keyboard = suggested_questions_keyboard(starter_questions)
-        await query.edit_message_text(text, reply_markup=keyboard)
+        # Final message with message-specific suggestions
+        sent_msg = await query.edit_message_text(text)
+        
+        from bot.handlers.rag import _save_suggested
+        keyboard = suggested_questions_keyboard(starter_questions, msg_id=sent_msg.message_id)
+        await sent_msg.edit_reply_markup(reply_markup=keyboard)
+        _save_suggested(context, None, None, starter_questions, msg_id=sent_msg.message_id)
         
         # End conversation, returning to standard RAG chat loop
         return ConversationHandler.END

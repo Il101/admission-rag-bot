@@ -44,10 +44,13 @@ def english_level_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-def suggested_questions_keyboard(questions: list) -> InlineKeyboardMarkup:
+def suggested_questions_keyboard(questions: list, msg_id: int = None) -> InlineKeyboardMarkup:
     """Create an inline keyboard from a list of suggested follow-up questions."""
     keyboard = []
     for i, q in enumerate(questions[:5]):  # max 5 buttons
         label = q if len(q) <= 60 else q[:57] + "..."
-        keyboard.append([InlineKeyboardButton(f"💬 {label}", callback_data=f"suggest_{i}")])
+        # If msg_id is provided, use sq_{msg_id}_{idx} format for better tracking.
+        # Otherwise, fall back to legacy suggest_{idx}.
+        callback_data = f"sq_{msg_id}_{i}" if msg_id else f"suggest_{i}"
+        keyboard.append([InlineKeyboardButton(f"💬 {label}", callback_data=callback_data)])
     return InlineKeyboardMarkup(keyboard)

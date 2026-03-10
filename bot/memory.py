@@ -7,7 +7,6 @@ Three layers:
 3. Recent Messages (existing) — last 6 raw messages
 """
 
-import json
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -71,44 +70,91 @@ JOURNEY_STAGES = {
 DEFAULT_JOURNEY_STATE = {stage: "pending" for stage in JOURNEY_STAGES}
 
 
-# ─── Memory Update via LLM ───────────────────────────────────────
+# ─── Keyword-based Memory Update (replaces LLM call) ─────────────
 
-MEMORY_UPDATE_PROMPT = """Ты — система обновления памяти бота-проводника по поступлению в Австрию.
+# Keywords that indicate a journey stage was discussed
+STAGE_KEYWORDS: dict[str, list[str]] = {
+    "documents_prep": [
+        "документ", "аттестат", "апостиль", "перевод", "справк", "диплом",
+        "нотариальн", "легализ", "копи", "оригинал", "выписк", "приложени",
+    ],
+    "nostrification": [
+        "нострификац", "признание", "anerkenn", "nostrifik", "bewertung",
+        "подтвержден", "эквивалент",
+    ],
+    "language": [
+        "немецк", "английск", "язык", "сертификат", "deutsch", "goethe",
+        "osd", "testdaf", "ielts", "toefl", "dsh", "a1", "a2", "b1", "b2",
+        "c1", "c2", "ergänzungsprüf", "vorstudienlehrgang", "курс",
+    ],
+    "university_choice": [
+        "университет", "вуз", "uni ", "fachhochschule", "программ",
+        "специальност", "факультет", "tu wien", "uni wien", "uni graz",
+        "uni innsbruck", "boku", "wu wien", "выбор", "рейтинг",
+    ],
+    "application": [
+        "подача", "заявк", "application", "zulassung", "bewerbung",
+        "дедлайн", "срок подач", "онлайн заявк", "подать", "apply",
+    ],
+    "admission_letter": [
+        "зачислен", "зачисл", "письмо", "zulassungsbescheid", "admission",
+        "offer", "приём", "принят",
+    ],
+    "visa_residence": [
+        "виз", "внж", "вид на жительство", "aufenthalts", "residence",
+        "permit", "ma35", "магистрат", "посольств", "консульств",
+        "страховк", "финансов", "гарант",
+    ],
+    "finances": [
+        "стоимост", "стипенди", "оплат", "studiengebühr", "взнос",
+        "scholarship", "oead", "грант", "бюджет", "расход", "сколько стоит",
+        "финанс", "банк",
+    ],
+    "housing_relocation": [
+        "жильё", "жилье", "квартир", "общежити", "studentenheim", "wg ",
+        "wohnung", "miet", "переезд", "аренд", "регистрац", "мельдунг",
+        "meldezettel",
+    ],
+}
 
-Тебе даны:
-1. Текущий journey_state — какие этапы пути обсуждались
-2. Текущий conversation_summary — краткое описание всего, что обсуждалось ранее
-3. Новый вопрос пользователя и ответ бота
+# Mood keywords
+MOOD_KEYWORDS: dict[str, list[str]] = {
+    "anxious": ["боюсь", "волнуюсь", "страшно", "паник", "не успе", "тревож"],
+    "confused": ["запутал", "не понимаю", "сложно", "непонятно", "столько всего"],
+    "frustrated": ["достало", "опять", "почему так", "бесит", "устал", "надоел"],
+    "excited": ["круто", "ура", "класс", "здорово", "отлично", "супер"],
+}
 
-Обнови ВСЕ поля:
 
-1. journey_state: отметь как "discussed" этапы, которые затронуты в новом вопросе/ответе.
+def _detect_stages(text: str) -> list[str]:
+    """Detect which journey stages are mentioned in the given text."""
+    text_lower = text.lower()
+    detected = []
+    for stage_id, keywords in STAGE_KEYWORDS.items():
+        for kw in keywords:
+            if kw in text_lower:
+                detected.append(stage_id)
+                break
+    return detected
 
-2. conversation_summary: добавь ключевые факты из нового обмена, сохрани старую информацию, не превышай 250 слов. ВАЖНО: включай конкретные факты о пользователе, если он их упоминает (название вуза, программа, статус документов, города, сроки).
 
-3. user_mood: определи текущее эмоциональное состояние пользователя по его вопросу. Одно из: "calm", "anxious", "confused", "frustrated", "excited".
+def _detect_mood(question: str) -> str:
+    """Detect user mood from their question using keyword matching."""
+    q_lower = question.lower()
+    for mood, keywords in MOOD_KEYWORDS.items():
+        for kw in keywords:
+            if kw in q_lower:
+                return mood
+    return "calm"
 
-ЭТАПЫ ПУТИ:
-documents_prep — подготовка документов (аттестат, апостиль, перевод)
-nostrification — нострификация (признание документов)
-language — языковые требования (немецкий, английский, сертификаты)
-university_choice — выбор университета и программы
-application — процесс подачи заявки
-admission_letter — получение письма о зачислении
-visa_residence — виза, ВНЖ, Aufenthaltstitel
-finances — стоимость, стипендии, финансирование
-housing_relocation — жильё, переезд, быт
 
-Ответь СТРОГО в формате JSON без markdown:
-{{"journey_state": {{"documents_prep": "pending|discussed"}}, "summary": "обновлённый текст", "user_mood": "calm"}}
-
-Текущий journey_state: {current_state}
-
-Текущий summary: {current_summary}
-
-Новый вопрос: {question}
-
-Ответ бота: {response}"""
+def _truncate_summary(summary: str, max_words: int = 250) -> str:
+    """Keep summary under max_words by trimming oldest sentences."""
+    words = summary.split()
+    if len(words) <= max_words:
+        return summary
+    # Keep the last max_words words (most recent info)
+    return "... " + " ".join(words[-max_words:])
 
 
 async def update_journey_and_summary(
@@ -119,7 +165,8 @@ async def update_journey_and_summary(
     response: str,
 ) -> None:
     """Update journey state, conversation summary, and mood after a RAG response.
-    
+
+    Uses fast keyword-based classification instead of an LLM call.
     Runs asynchronously — should be awaited after sending the response to the user.
     """
     try:
@@ -127,36 +174,30 @@ async def update_journey_and_summary(
         current_state = memory["journey_state"] or DEFAULT_JOURNEY_STATE.copy()
         current_summary = memory["conversation_summary"] or "Начало общения."
 
-        prompt = MEMORY_UPDATE_PROMPT.format(
-            current_state=json.dumps(current_state, ensure_ascii=False),
-            current_summary=current_summary,
-            question=question[:500],
-            response=response[:1000]
-        )
-        
-        result = await simple_rag.agenerate_json(prompt)
+        # 1. Detect discussed stages from question + response
+        combined_text = f"{question} {response}"
+        newly_discussed = _detect_stages(combined_text)
 
-        # Parse the JSON response
-        # Strip markdown code fences if present
-        result = result.strip()
-        if result.startswith("```"):
-            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
-        if result.endswith("```"):
-            result = result[:-3]
-        result = result.strip()
+        new_state = dict(current_state)
+        for stage_id in newly_discussed:
+            new_state[stage_id] = "discussed"
 
-        parsed = json.loads(result)
-        new_state = parsed.get("journey_state", current_state)
-        new_summary = parsed.get("summary", current_summary)
-        user_mood = parsed.get("user_mood", "calm")
-
-        # Merge: never downgrade "discussed" back to "pending"
+        # Never downgrade "discussed" back to "pending"
         for stage in JOURNEY_STAGES:
             if current_state.get(stage) == "discussed":
                 new_state[stage] = "discussed"
 
-        # Store mood as a special key in journey_state
+        # 2. Detect mood
+        user_mood = _detect_mood(question)
         new_state["_user_mood"] = user_mood
+
+        # 3. Append to summary (simple concatenation + truncation)
+        # Extract a brief summary of the exchange
+        q_snippet = question[:150].strip()
+        r_snippet = response[:200].strip()
+        new_entry = f"В: {q_snippet} | О: {r_snippet}"
+        new_summary = f"{current_summary}\n{new_entry}"
+        new_summary = _truncate_summary(new_summary)
 
         await update_user_memory(session, tg_id, new_state, new_summary)
 

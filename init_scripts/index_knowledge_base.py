@@ -50,30 +50,48 @@ def split_markdown(body: str, file_metadata: dict, max_chunk_len: int = 800) -> 
     Each chunk inherits the chain of headings above it as a section_path,
     and gets a contextual prefix prepended for better embedding quality.
     
+    Supports section-level URLs via <!-- url: https://... --> HTML comments.
+    Each chunk gets the most specific URL available (section > parent > frontmatter).
+    
     Returns list of {"content": str, "metadata": dict}.
     """
     lines = body.split("\n")
     
     # Track current heading hierarchy: {level: heading_text}
     heading_stack: dict[int, str] = {}
+    # Track section-level URLs: {level: url}
+    url_stack: dict[int, str] = {}
     
-    # Collect sections: each section is (heading_stack_snapshot, text_lines)
-    sections: list[tuple[dict, list[str]]] = []
+    # Collect sections: each section is (heading_stack_snapshot, url_snapshot, text_lines)
+    sections: list[tuple[dict, dict, list[str]]] = []
     current_lines: list[str] = []
     current_headings: dict[int, str] = {}
+    current_urls: dict[int, str] = {}
+    current_heading_level: int = 0
+    
+    url_comment_re = re.compile(r'<!--\s*url:\s*(https?://\S+)\s*-->')
     
     for line in lines:
+        # Check for <!-- url: ... --> comment
+        url_match = url_comment_re.match(line.strip())
+        if url_match:
+            url = url_match.group(1)
+            url_stack[current_heading_level] = url
+            current_urls = dict(url_stack)
+            continue  # Don't include the comment line in chunk content
+        
         heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
         if heading_match:
             # Save the current section before starting a new one
             if current_lines:
                 text = "\n".join(current_lines).strip()
                 if text:
-                    sections.append((dict(current_headings), current_lines[:]))
+                    sections.append((dict(current_headings), dict(current_urls), current_lines[:]))
                 current_lines = []
             
             level = len(heading_match.group(1))
             heading_text = heading_match.group(2).strip()
+            current_heading_level = level
             
             # Update heading stack: set this level and clear deeper levels
             heading_stack[level] = heading_text
@@ -81,8 +99,14 @@ def split_markdown(body: str, file_metadata: dict, max_chunk_len: int = 800) -> 
             for k in keys_to_remove:
                 del heading_stack[k]
             
-            # Snapshot current headings for this section
+            # Clear deeper URL overrides too (new section resets child URLs)
+            url_keys_to_remove = [k for k in url_stack if k > level]
+            for k in url_keys_to_remove:
+                del url_stack[k]
+            
+            # Snapshot current headings and URLs for this section
             current_headings = dict(heading_stack)
+            current_urls = dict(url_stack)
             current_lines.append(line)
         else:
             current_lines.append(line)
@@ -91,23 +115,28 @@ def split_markdown(body: str, file_metadata: dict, max_chunk_len: int = 800) -> 
     if current_lines:
         text = "\n".join(current_lines).strip()
         if text:
-            sections.append((dict(current_headings), current_lines[:]))
+            sections.append((dict(current_headings), dict(current_urls), current_lines[:]))
     
     # Build the document title from the H1 or from metadata
     doc_title = file_metadata.get("title", "")
     if not doc_title:
         # Try to get it from heading_stack level 1
-        for headings, _ in sections:
+        for headings, _, _ in sections:
             if 1 in headings:
                 doc_title = headings[1]
                 break
     if not doc_title:
         doc_title = file_metadata.get("source", "Документ").replace(".md", "").replace("-", " ").title()
 
+    # Fallback URL from frontmatter (may contain multiple pipe-separated URLs; take first)
+    fallback_url = file_metadata.get("source_url", "")
+    if isinstance(fallback_url, str) and "|" in fallback_url:
+        fallback_url = fallback_url.split("|")[0].strip()
+
     # Now build chunks from sections
     chunks = []
     
-    for headings, section_lines in sections:
+    for headings, urls, section_lines in sections:
         section_text = "\n".join(section_lines).strip()
         if not section_text or len(section_text) < 30:
             continue
@@ -119,6 +148,12 @@ def split_markdown(body: str, file_metadata: dict, max_chunk_len: int = 800) -> 
                 continue  # H1 is the doc title, already in prefix
             path_parts.append(headings[lvl])
         section_path = " > ".join(path_parts) if path_parts else ""
+        
+        # Resolve the best URL: deepest level in url_stack, or fallback
+        section_url = fallback_url
+        if urls:
+            deepest_level = max(urls.keys())
+            section_url = urls[deepest_level]
         
         # Build contextual prefix
         prefix_parts = []
@@ -142,9 +177,10 @@ def split_markdown(body: str, file_metadata: dict, max_chunk_len: int = 800) -> 
             "source": file_metadata.get("source", ""),
             "title": doc_title,
             "section_path": section_path,
+            "source_url": section_url,
         }
-        # Copy important fields from frontmatter
-        for key in ("source_url", "university", "topic", "country_scope", "level", "city", "related_docs"):
+        # Copy other important fields from frontmatter
+        for key in ("university", "topic", "country_scope", "level", "city", "related_docs"):
             if key in file_metadata:
                 chunk_meta[key] = file_metadata[key]
         
@@ -250,7 +286,7 @@ async def index():
                 id SERIAL PRIMARY KEY,
                 content TEXT,
                 metadata JSONB,
-                embedding vector
+                embedding vector(3072)
             )
         """))
         
@@ -258,6 +294,19 @@ async def index():
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_simple_documents_metadata "
             "ON simple_documents USING GIN (metadata)"
+        ))
+        
+        # HNSW index for fast approximate nearest-neighbor vector search
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_simple_documents_embedding_hnsw "
+            "ON simple_documents USING hnsw (embedding vector_cosine_ops) "
+            "WITH (m = 16, ef_construction = 64)"
+        ))
+        
+        # Full-text search index for hybrid retrieval (BM25-like)
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_simple_documents_content_fts "
+            "ON simple_documents USING GIN (to_tsvector('russian', content))"
         ))
         
         # Check if table has data. Even if hash matches, table might be empty
