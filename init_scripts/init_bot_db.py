@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def migrate_memory_columns(engine):
-    """Add journey_state and conversation_summary columns if they don't exist."""
+    """Add new columns and tables if they don't exist."""
     from sqlalchemy import text
     with engine.connect() as conn:
         try:
@@ -30,8 +30,45 @@ def migrate_memory_columns(engine):
             conn.execute(text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS english_level TEXT"
             ))
+            # Feedback table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tg_id BIGINT REFERENCES users(tg_id) ON DELETE CASCADE,
+                    message_id BIGINT NOT NULL,
+                    question TEXT NOT NULL,
+                    answer TEXT NOT NULL,
+                    rating INTEGER NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_tg_id ON feedback(tg_id)"
+            ))
+            # Pipeline logs table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS pipeline_logs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tg_id BIGINT NOT NULL,
+                    question TEXT NOT NULL,
+                    rewritten_question TEXT,
+                    cache_hit BOOLEAN DEFAULT FALSE,
+                    docs_retrieved INTEGER DEFAULT 0,
+                    docs_after_grading INTEGER DEFAULT 0,
+                    t_rewrite DOUBLE PRECISION,
+                    t_retrieve DOUBLE PRECISION,
+                    t_grade DOUBLE PRECISION,
+                    t_generate DOUBLE PRECISION,
+                    t_total DOUBLE PRECISION NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_pipeline_logs_created "
+                "ON pipeline_logs(created_at)"
+            ))
             conn.commit()
-            logger.info("Memory columns migration applied successfully.")
+            logger.info("Memory columns + analytics tables migration applied successfully.")
         except Exception as e:
             logger.warning(f"Migration warning (may already exist): {e}")
 

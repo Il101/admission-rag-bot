@@ -10,9 +10,9 @@ from telegram.ext import ContextTypes
 from telegram.error import BadRequest, RetryAfter
 
 from bot.decorators import filter_banned, with_db_session
-from bot.keyboards import suggested_questions_keyboard
+from bot.keyboards import suggested_questions_keyboard, combined_keyboard
 from bot.utils import docs_to_sources_str, make_html_quote, remove_bot_command, sanitize_telegram_html
-from bot.db import get_context_messages, add_chat_messages, get_user_memory, get_user
+from bot.db import get_context_messages, add_chat_messages, get_user_memory, get_user, add_pipeline_log
 from bot.memory import (
     build_memory_context,
     get_current_date,
@@ -253,6 +253,25 @@ async def _persist_suggested(db_session, tg_id: int, suggested: list):
         logger.warning("Failed to persist suggested questions to DB", exc_info=True)
 
 
+def _store_qa(context, msg_id: int, question: str, answer_text: str):
+    """Store question/answer pair for feedback tracking."""
+    if "_qa_map" not in context.user_data:
+        context.user_data["_qa_map"] = {}
+    context.user_data["_qa_map"][msg_id] = {
+        "question": question[:500],
+        "answer": answer_text[:500],
+    }
+    qa = context.user_data["_qa_map"]
+    if len(qa) > 20:
+        for k in sorted(qa.keys())[:-20]:
+            qa.pop(k, None)
+
+
+def _fmt_timings(t: dict) -> str:
+    """Format pipeline step timings for logging."""
+    return " | ".join(f"{k}: {v:.2f}s" for k, v in t.items())
+
+
 async def _handle_question_core(
     context,
     simple_rag,
@@ -263,10 +282,13 @@ async def _handle_question_core(
     question: str,
     onboarding_data: dict,
 ):
-    """Core logic for answering a question: memory → rewrite → retrieve → grade → stream → send.
+    """Core logic: memory → rewrite → cache check → retrieve → grade → stream → send.
     
     Shared by answer(), answer_to_replied(), and handle_suggested_question().
     """
+    timings = {}
+    pipeline_start = time.monotonic()
+
     # Always restore onboarding from DB if lost after bot restart
     onboarding_data = await _ensure_onboarding_loaded(context, db_session, tg_id)
 
@@ -281,38 +303,80 @@ async def _handle_question_core(
     )
 
     # 1. Rewrite query for better vector search (resolves anaphora, adds keywords)
+    t0 = time.monotonic()
     actual_question = await simple_rag.arewrite_query(
         question, chat_history_str, memory_context_str
     )
+    timings["rewrite"] = time.monotonic() - t0
+
+    # 1a. Check semantic answer cache
+    t0 = time.monotonic()
+    cached_response = await simple_rag.get_cached_answer(actual_question)
+    timings["cache_check"] = time.monotonic() - t0
+
+    if cached_response:
+        clean_text, suggested = parse_suggested_buttons(cached_response)
+        safe_text = sanitize_telegram_html(clean_text)
+        keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
+        await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        if suggested:
+            _save_suggested(context, db_session, tg_id, suggested, msg_id=msg.message_id)
+        _store_qa(context, msg.message_id, question, clean_text)
+        await add_chat_messages(db_session, tg_id, question, clean_text)
+        asyncio.create_task(
+            update_journey_and_summary(simple_rag, db_session, tg_id, question, clean_text)
+        )
+        timings["total"] = time.monotonic() - pipeline_start
+        logger.info("[User %s] Cache hit | %s", tg_id, _fmt_timings(timings))
+        asyncio.create_task(add_pipeline_log(
+            db_session, tg_id, question, actual_question,
+            cache_hit=True, docs_retrieved=0, docs_after_grading=0, timings=timings,
+        ))
+        return
 
     # 2. Retrieve candidates
+    t0 = time.monotonic()
     user_filters = _build_user_filters(onboarding_data)
     docs = await simple_rag.aretrieve(actual_question, user_filters=user_filters)
+    timings["retrieve"] = time.monotonic() - t0
 
     # 3. Grade for relevance (CRAG filtering)
+    t0 = time.monotonic()
     docs = await simple_rag.agrade_documents(actual_question, docs)
+    timings["grade"] = time.monotonic() - t0
 
     if len(docs) == 0:
         giveup_text = "К сожалению, я не смог найти релевантную информацию по этому запросу. 😔"
         clean_text, suggested = parse_suggested_buttons(giveup_text)
         safe_text = sanitize_telegram_html(clean_text)
 
-        keyboard = None
+        keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
         if suggested:
-            keyboard = suggested_questions_keyboard(suggested)
-            _save_suggested(context, db_session, tg_id, suggested)
+            _save_suggested(context, db_session, tg_id, suggested, msg_id=msg.message_id)
 
         await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        _store_qa(context, msg.message_id, question, clean_text)
         await add_chat_messages(db_session, tg_id, question, clean_text)
+        timings["total"] = time.monotonic() - pipeline_start
+        logger.info("[User %s] No relevant docs | %s", tg_id, _fmt_timings(timings))
+        asyncio.create_task(add_pipeline_log(
+            db_session, tg_id, question, actual_question,
+            cache_hit=False, docs_retrieved=0, docs_after_grading=0, timings=timings,
+        ))
         return
 
     context_str = documents_to_context_str(docs)
     
     # 4. Stream answer
+    t0 = time.monotonic()
     full_response = await _stream_answer(
         msg, simple_rag, actual_question, context_str,
         chat_history_str, memory_context_str,
     )
+    timings["generate"] = time.monotonic() - t0
+
+    # Cache answer for future similar questions
+    asyncio.create_task(simple_rag.cache_answer(actual_question, full_response))
 
     clean_text, suggested = parse_suggested_buttons(full_response)
 
@@ -322,25 +386,31 @@ async def _handle_question_core(
 
     safe_text = sanitize_telegram_html(clean_text)
 
-    keyboard = None
-    if suggested:
-        # Initial keyboard (no ID yet)
-        keyboard = suggested_questions_keyboard(suggested)
-        _save_suggested(context, db_session, tg_id, suggested)
-
+    # Combined keyboard: suggested questions + feedback (👍/👎)
+    keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
     await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-
-    # If we have a final message with suggestions, re-bind them with message ID
     if suggested:
-        new_keyboard = suggested_questions_keyboard(suggested, msg_id=msg.message_id)
-        await msg.edit_reply_markup(reply_markup=new_keyboard)
-        _save_suggested(context, None, None, suggested, msg_id=msg.message_id)
+        _save_suggested(context, db_session, tg_id, suggested, msg_id=msg.message_id)
 
-    # 5. Persist conversation + update memory (fire-and-forget — doesn't delay response)
+    # Store Q&A for feedback tracking
+    _store_qa(context, msg.message_id, question, clean_text)
+
+    # 5. Persist conversation + update memory
     await add_chat_messages(db_session, tg_id, question, clean_text)
     asyncio.create_task(
         update_journey_and_summary(simple_rag, db_session, tg_id, question, clean_text)
     )
+
+    timings["total"] = time.monotonic() - pipeline_start
+    logger.info(
+        "[User %s] Pipeline complete (%d docs) | %s",
+        tg_id, len(docs), _fmt_timings(timings),
+    )
+    asyncio.create_task(add_pipeline_log(
+        db_session, tg_id, question, actual_question,
+        cache_hit=False, docs_retrieved=len(docs), docs_after_grading=len(docs),
+        timings=timings,
+    ))
 
 
 @with_db_session()

@@ -4,8 +4,8 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from bot.decorators import with_db_session
-from bot.db import delete_user_data
+from bot.decorators import with_db_session, admin_only
+from bot.db import delete_user_data, get_analytics_summary, get_feedback_stats, Feedback
 
 logger = logging.getLogger(__name__)
 
@@ -56,3 +56,64 @@ async def ignore(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Unhandled exception", exc_info=context.error)
+
+
+@with_db_session()
+@admin_only(should_can_add_admins=False, should_can_add_info=False)
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE, db_session):
+    """Admin-only command: show bot analytics dashboard."""
+    # Parse optional days argument: /stats 30
+    parts = (update.effective_message.text or "").split()
+    days = 7
+    if len(parts) > 1:
+        try:
+            days = int(parts[1])
+        except ValueError:
+            pass
+
+    try:
+        data = await get_analytics_summary(db_session, days=days)
+    except Exception as e:
+        logger.exception("Failed to get analytics")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"⚠️ Ошибка при сборе аналитики: {e}",
+        )
+        return
+
+    u = data["users"]
+    q = data["queries"]
+    fb = data["feedback"]
+    m = data["messages"]
+
+    satisfaction = "-"
+    if fb["total"] > 0:
+        satisfaction = f"{fb['positive'] / fb['total'] * 100:.0f}%"
+
+    text = (
+        f"📊 <b>Аналитика за {days} дней</b>\n"
+        f"\n"
+        f"👥 <b>Пользователи</b>\n"
+        f"  Всего: {u['total']}\n"
+        f"  Активных за период: {u['active_last_period']}\n"
+        f"\n"
+        f"⚡ <b>Пайплайн</b>\n"
+        f"  Запросов: {q['total']}\n"
+        f"  Кэш-хиты: {q['cache_hits']} ({q['cache_hit_rate']:.1%})\n"
+        f"  Avg latency: {q['avg_latency_s']}s\n"
+        f"  P95 latency: {q['p95_latency_s']}s\n"
+        f"  Avg docs/query: {q['avg_docs_per_query']}\n"
+        f"\n"
+        f"👍 <b>Фидбэк</b>\n"
+        f"  👍 {fb['positive']}  👎 {fb['negative']}  (всего {fb['total']})\n"
+        f"  Удовлетворённость: {satisfaction}\n"
+        f"\n"
+        f"💬 <b>Сообщения</b>\n"
+        f"  За период: {m['total_last_period']}"
+    )
+
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        parse_mode=ParseMode.HTML,
+    )

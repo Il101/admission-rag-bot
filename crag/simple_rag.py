@@ -44,6 +44,49 @@ class _LRUCache(OrderedDict):
 _embedding_cache = _LRUCache(_EMBEDDING_CACHE_MAX)
 
 
+# ── Semantic answer cache ────────────────────────────────────────────────
+
+
+class _SemanticCache:
+    """Cache full pipeline answers keyed by question embedding similarity.
+
+    If a new question's embedding cosine similarity to a cached entry
+    exceeds *threshold*, the cached answer JSON is returned — skipping
+    retrieval, grading, and generation entirely.
+    """
+
+    def __init__(self, max_size: int = 128, threshold: float = 0.97):
+        self._entries: list[tuple[list[float], str]] = []
+        self._max_size = max_size
+        self._threshold = threshold
+
+    @staticmethod
+    def _cosine_sim(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        na = sum(x * x for x in a) ** 0.5
+        nb = sum(x * x for x in b) ** 0.5
+        return dot / (na * nb) if na and nb else 0.0
+
+    def get(self, embedding: list[float]) -> str | None:
+        best_sim, best_answer = 0.0, None
+        for cached_emb, cached_answer in self._entries:
+            sim = self._cosine_sim(embedding, cached_emb)
+            if sim > best_sim:
+                best_sim, best_answer = sim, cached_answer
+        if best_sim >= self._threshold:
+            logger.info("Semantic cache HIT (sim=%.4f)", best_sim)
+            return best_answer
+        return None
+
+    def put(self, embedding: list[float], answer: str):
+        if len(self._entries) >= self._max_size:
+            self._entries.pop(0)
+        self._entries.append((embedding, answer))
+
+
+_answer_cache = _SemanticCache()
+
+
 # ── Jinja2 safe template rendering ──────────────────────────────────────
 
 
@@ -348,8 +391,8 @@ class SimpleRAG:
         vector_score = "embedding <=> CAST(:embedding AS vector)"
         fts_score = (
             "COALESCE(1.0 - ts_rank_cd("
-            "to_tsvector('russian', content), "
-            "plainto_tsquery('russian', :query_text)"
+            "to_tsvector('simple', content) || to_tsvector('russian', content), "
+            "plainto_tsquery('simple', :query_text) || plainto_tsquery('russian', :query_text)"
             "), 1.0)"
         )
         hybrid_score = (
@@ -559,6 +602,50 @@ class SimpleRAG:
                     "suggested_questions": [],
                 }
             )
+
+    # ── Semantic answer cache ────────────────────────────────────────────
+
+    async def get_cached_answer(self, question: str) -> str | None:
+        """Check if a semantically similar question was already answered."""
+        emb = await self.get_embedding(question)
+        if not emb:
+            return None
+        return _answer_cache.get(emb)
+
+    async def cache_answer(self, question: str, answer_json: str):
+        """Store a question → answer pair in the semantic cache."""
+        emb = await self.get_embedding(question)
+        if emb:
+            _answer_cache.put(emb, answer_json)
+
+    # ── LLM-based summary compression ───────────────────────────────────
+
+    async def acompress_summary(self, summary: str) -> str:
+        """Use LLM to compress a conversation summary, keeping key facts."""
+        prompt = (
+            "Сожми следующее резюме разговора с ботом о поступлении в Австрию "
+            "в 5-8 ключевых фактов о пользователе. "
+            "Сохрани: конкретные вузы, города, уровни языка, сроки, документы, "
+            "принятые решения. Убери: формулировки вопросов и общие фразы.\n"
+            "Формат: простой текст, каждый факт с новой строки.\n\n"
+            f"{summary}"
+        )
+        try:
+            response = await retry_on_503(
+                self.client.aio.models.generate_content,
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.0),
+            )
+            compressed = (response.text or "").strip()
+            if compressed and len(compressed) < len(summary):
+                logger.info(
+                    "Summary compressed: %d → %d chars", len(summary), len(compressed)
+                )
+                return compressed
+        except Exception as e:
+            logger.warning("Summary compression failed: %s", e)
+        return summary
 
     # ── Document management ──────────────────────────────────────────────
 

@@ -191,13 +191,22 @@ async def update_journey_and_summary(
         user_mood = _detect_mood(question)
         new_state["_user_mood"] = user_mood
 
-        # 3. Append to summary (simple concatenation + truncation)
-        # Extract a brief summary of the exchange
+        # 3. Append to summary + periodic LLM compression
         q_snippet = question[:150].strip()
         r_snippet = response[:200].strip()
         new_entry = f"В: {q_snippet} | О: {r_snippet}"
         new_summary = f"{current_summary}\n{new_entry}"
-        new_summary = _truncate_summary(new_summary)
+
+        # Compress with LLM every 5 exchanges to keep summary focused
+        exchange_count = new_summary.count("\nВ: ")
+        if exchange_count >= 5 and exchange_count % 5 == 0 and simple_rag is not None:
+            try:
+                new_summary = await simple_rag.acompress_summary(new_summary)
+            except Exception:
+                logger.warning("LLM summary compression failed, using truncation")
+                new_summary = _truncate_summary(new_summary)
+        else:
+            new_summary = _truncate_summary(new_summary)
 
         await update_user_memory(session, tg_id, new_state, new_summary)
 

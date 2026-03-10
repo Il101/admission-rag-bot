@@ -33,9 +33,10 @@ from bot.handlers.rag import (
     retrieve_docs,
     retrieve_docs_to_replied,
 )
-from bot.handlers.service import error, help_command, ignore, reaction, unknown, delete_data
+from bot.handlers.service import error, help_command, ignore, reaction, unknown, delete_data, admin_stats
 from bot.handlers.onboarding import build_onboarding_handler
 from bot.handlers.suggested import build_suggested_handler
+from bot.handlers.feedback import build_feedback_handler
 from crag.simple_rag import SimpleRAG
 
 logging.basicConfig(
@@ -115,13 +116,14 @@ def prepare_handlers(config: DictConfig):
     rag_handlers = prepare_rag_based_handlers(simple_rag, db_session)
     manag_handlers = prepare_management_handlers(simple_rag, db_session)
     suggested_handler = build_suggested_handler(simple_rag, db_session)
+    feedback_handler = build_feedback_handler(db_session)
 
-    return rag_handlers, manag_handlers, db_session, suggested_handler
+    return rag_handlers, manag_handlers, db_session, suggested_handler, feedback_handler
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="default")
 def main(config: DictConfig) -> None:
-    rag_handlers, manag_handlers, db_session, suggested_callback = prepare_handlers(config)
+    rag_handlers, manag_handlers, db_session, suggested_callback, feedback_callback = prepare_handlers(config)
 
     tgbot_token = os.getenv("TGBOT_TOKEN")
     application = ApplicationBuilder().token(tgbot_token).build()
@@ -131,8 +133,10 @@ def main(config: DictConfig) -> None:
     edited_message_handler = MessageHandler(filters.UpdateType.EDITED_MESSAGE, ignore)
     
     onboarding_handler = build_onboarding_handler(db_session)
-    suggested_question_handler = CallbackQueryHandler(suggested_callback, pattern="^suggest_")
+    suggested_question_handler = CallbackQueryHandler(suggested_callback, pattern="^(suggest_|sq_)")
+    feedback_cq_handler = CallbackQueryHandler(feedback_callback, pattern="^fb_")
     delete_data_handler = CommandHandler("delete_my_data", partial(delete_data, db_session=db_session))
+    stats_handler = CommandHandler("stats", partial(admin_stats, db_session=db_session))
 
     answer_handler = CommandHandler("ans", rag_handlers["answer"])
     answer_to_replied_handler = CommandHandler(
@@ -167,7 +171,9 @@ def main(config: DictConfig) -> None:
     application.add_handler(help_handler)
     application.add_handler(reaction_handler)
     application.add_handler(delete_data_handler)
+    application.add_handler(stats_handler)
     application.add_handler(suggested_question_handler)
+    application.add_handler(feedback_cq_handler)
     application.add_handler(answer_handler)
     application.add_handler(answer_to_replied_handler)
     application.add_handler(retrieve_docs_handler)

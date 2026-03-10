@@ -304,9 +304,10 @@ async def index():
         ))
         
         # Full-text search index for hybrid retrieval (BM25-like)
+        # Combined simple + russian config for multilingual KB (German/English + Russian)
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_simple_documents_content_fts "
-            "ON simple_documents USING GIN (to_tsvector('russian', content))"
+            "ON simple_documents USING GIN ((to_tsvector('simple', content) || to_tsvector('russian', content)))"
         ))
         
         # Check if table has data. Even if hash matches, table might be empty

@@ -1,0 +1,212 @@
+[
+  {
+    "id": 1,
+    "question": "Какие документы нужны для поступления на бакалавриат в Австрию из России?",
+    "expected_keywords": ["аттестат", "апостиль", "перевод", "нотариальн"],
+    "topic": "documents_prep",
+    "difficulty": "basic"
+  },
+  {
+    "id": 2,
+    "question": "Что такое нострификация и нужна ли она мне?",
+    "expected_keywords": ["нострификац", "признание", "Anerkennung", "диплом"],
+    "topic": "nostrification",
+    "difficulty": "basic"
+  },
+  {
+    "id": 3,
+    "question": "Какой уровень немецкого нужен для поступления в Uni Wien?",
+    "expected_keywords": ["B2", "C1", "Ergänzungsprüfung", "Vorstudienlehrgang"],
+    "topic": "language",
+    "difficulty": "basic"
+  },
+  {
+    "id": 4,
+    "question": "Какие дедлайны подачи документов в Uni Wien на зимний семестр?",
+    "expected_keywords": ["дедлайн", "сентябр", "зимн", "Non-EU"],
+    "topic": "application",
+    "difficulty": "medium"
+  },
+  {
+    "id": 5,
+    "question": "Сколько стоит обучение в Австрии для граждан России?",
+    "expected_keywords": ["726", "семестр", "ÖH-Beitrag", "взнос", "Non-EU"],
+    "topic": "finances",
+    "difficulty": "basic"
+  },
+  {
+    "id": 6,
+    "question": "Как получить студенческий ВНЖ в Вене?",
+    "expected_keywords": ["MA35", "Aufenthaltstitel", "вид на жительство", "Вена"],
+    "topic": "visa_residence",
+    "difficulty": "medium"
+  },
+  {
+    "id": 7,
+    "question": "Какие англоязычные программы магистратуры есть в Австрии?",
+    "expected_keywords": ["English", "Master", "программ", "англоязычн"],
+    "topic": "university_choice",
+    "difficulty": "medium"
+  },
+  {
+    "id": 8,
+    "question": "Как найти жильё студенту в Вене?",
+    "expected_keywords": ["Studentenheim", "общежити", "WG", "OeAD Housing"],
+    "topic": "housing_relocation",
+    "difficulty": "basic"
+  },
+  {
+    "id": 9,
+    "question": "Какие стипендии доступны иностранным студентам в Австрии?",
+    "expected_keywords": ["OeAD", "стипенди", "Ernst Mach", "грант"],
+    "topic": "finances",
+    "difficulty": "medium"
+  },
+  {
+    "id": 10,
+    "question": "Чем отличается Universität от Fachhochschule?",
+    "expected_keywords": ["Universität", "Fachhochschule", "FH", "прикладн", "исследовательск"],
+    "topic": "university_choice",
+    "difficulty": "basic"
+  },
+  {
+    "id": 11,
+    "question": "Нужен ли апостиль на школьный аттестат?",
+    "expected_keywords": ["апостиль", "аттестат", "легализ", "Гааг"],
+    "topic": "documents_prep",
+    "difficulty": "basic"
+  },
+  {
+    "id": 12,
+    "question": "Как проходит подача документов в TU Wien на бакалавриат?",
+    "expected_keywords": ["TU Wien", "подача", "онлайн", "Zulassung"],
+    "topic": "application",
+    "difficulty": "medium"
+  },
+  {
+    "id": 13,
+    "question": "Какие курсы немецкого в Австрии самые лучшие?",
+    "expected_keywords": ["Vorstudienlehrgang", "курс", "интенсив", "ÖSD"],
+    "topic": "language",
+    "difficulty": "medium"
+  },
+  {
+    "id": 14,
+    "question": "Что такое Ergänzungsprüfungen?",
+    "expected_keywords": ["Ergänzungsprüfung", "дополнительн", "экзамен", "предмет"],
+    "topic": "nostrification",
+    "difficulty": "medium"
+  },
+  {
+    "id": 15,
+    "question": "Сколько нужно денег на банковском счету для ВНЖ?",
+    "expected_keywords": ["банк", "счёт", "финансов", "гарант", "EUR"],
+    "topic": "visa_residence",
+    "difficulty": "medium"
+  },
+  {
+    "id": 16,
+    "question": "Какие университеты есть в Граце?",
+    "expected_keywords": ["Graz", "Грац", "Karl-Franzens", "TU Graz"],
+    "topic": "university_choice",
+    "difficulty": "basic"
+  },
+  {
+    "id": 17,
+    "question": "Можно ли работать студенту в Австрии?",
+    "expected_keywords": ["работ", "час", "20 часов", "Geringfügig", "разрешен"],
+    "topic": "finances",
+    "difficulty": "medium"
+  },
+  {
+    "id": 18,
+    "question": "Как зарегистрироваться по месту жительства в Австрии?",
+    "expected_keywords": ["Meldezettel", "регистрац", "мельдунг", "Meldeamt"],
+    "topic": "housing_relocation",
+    "difficulty": "medium"
+  },
+  {
+    "id": 19,
+    "question": "Какой сертификат ÖSD или Goethe принимают вузы?",
+    "expected_keywords": ["ÖSD", "Goethe", "TestDaF", "сертификат", "принима"],
+    "topic": "language",
+    "difficulty": "medium"
+  },
+  {
+    "id": 20,
+    "question": "Как подать заявку на общежитие в Вене?",
+    "expected_keywords": ["общежити", "Studentenheim", "WIST", "подать"],
+    "topic": "housing_relocation",
+    "difficulty": "medium"
+  },
+  {
+    "id": 21,
+    "question": "Какие программы в Uni Innsbruck?",
+    "expected_keywords": ["Innsbruck", "Инсбрук", "программ", "факультет"],
+    "topic": "university_choice",
+    "difficulty": "medium"
+  },
+  {
+    "id": 22,
+    "question": "Дай мне чек-лист для поступления на бакалавриат",
+    "expected_keywords": ["документ", "язык", "подача", "виз", "чек-лист"],
+    "topic": "documents_prep",
+    "difficulty": "basic"
+  },
+  {
+    "id": 23,
+    "question": "Что делать если я не успеваю к дедлайну?",
+    "expected_keywords": ["дедлайн", "срок", "альтернатив", "летн"],
+    "topic": "application",
+    "difficulty": "hard"
+  },
+  {
+    "id": 24,
+    "question": "Как получить письмо о зачислении Zulassungsbescheid?",
+    "expected_keywords": ["Zulassungsbescheid", "зачислен", "письмо"],
+    "topic": "admission_letter",
+    "difficulty": "medium"
+  },
+  {
+    "id": 25,
+    "question": "Нужна ли медицинская страховка для студенческой визы?",
+    "expected_keywords": ["страховк", "медицинск", "ÖGK", "виз"],
+    "topic": "visa_residence",
+    "difficulty": "medium"
+  },
+  {
+    "id": 26,
+    "question": "Есть ли программы на английском в WU Wien?",
+    "expected_keywords": ["WU Wien", "English", "англ", "Master", "программ"],
+    "topic": "university_choice",
+    "difficulty": "medium"
+  },
+  {
+    "id": 27,
+    "question": "Как продлить ВНЖ студента?",
+    "expected_keywords": ["продл", "ВНЖ", "Aufenthalts", "MA35", "документ"],
+    "topic": "visa_residence",
+    "difficulty": "hard"
+  },
+  {
+    "id": 28,
+    "question": "Что такое Vorstudienlehrgang?",
+    "expected_keywords": ["Vorstudienlehrgang", "подготовительн", "курс", "язык"],
+    "topic": "language",
+    "difficulty": "basic"
+  },
+  {
+    "id": 29,
+    "question": "Какой бюджет нужен студенту в Вене в месяц?",
+    "expected_keywords": ["бюджет", "расход", "EUR", "жильё", "еда", "транспорт"],
+    "topic": "finances",
+    "difficulty": "medium"
+  },
+  {
+    "id": 30,
+    "question": "Привет, я хочу поступить в Австрию, с чего начать?",
+    "expected_keywords": ["документ", "язык", "университет", "начать", "план"],
+    "topic": "documents_prep",
+    "difficulty": "basic"
+  }
+]

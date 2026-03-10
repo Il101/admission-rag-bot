@@ -54,3 +54,25 @@ def suggested_questions_keyboard(questions: list, msg_id: int = None) -> InlineK
         callback_data = f"sq_{msg_id}_{i}" if msg_id else f"suggest_{i}"
         keyboard.append([InlineKeyboardButton(f"💬 {label}", callback_data=callback_data)])
     return InlineKeyboardMarkup(keyboard)
+
+
+def feedback_keyboard(msg_id: int) -> list:
+    """Return a row of feedback buttons to append to any InlineKeyboardMarkup."""
+    return [
+        InlineKeyboardButton("👍 Полезно", callback_data=f"fb_{msg_id}_1"),
+        InlineKeyboardButton("👎 Не помогло", callback_data=f"fb_{msg_id}_-1"),
+    ]
+
+
+def combined_keyboard(
+    suggested: list, msg_id: int, with_feedback: bool = True,
+) -> InlineKeyboardMarkup:
+    """Suggested-question rows + optional feedback row at the bottom."""
+    keyboard = []
+    for i, q in enumerate(suggested[:4]):  # max 4 so total ≤ 5 rows
+        label = q if len(q) <= 60 else q[:57] + "..."
+        callback_data = f"sq_{msg_id}_{i}" if msg_id else f"suggest_{i}"
+        keyboard.append([InlineKeyboardButton(f"💬 {label}", callback_data=callback_data)])
+    if with_feedback and msg_id:
+        keyboard.append(feedback_keyboard(msg_id))
+    return InlineKeyboardMarkup(keyboard)
