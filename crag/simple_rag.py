@@ -299,10 +299,20 @@ class SimpleRAG:
     # ── Prompt extraction ────────────────────────────────────────────────
 
     def _extract_system_prompt(self, messages: list) -> str:
+        base_prompt = "Ты — полезный ассистент."
         for m in messages:
             if m.get("_target_") == "langchain_core.messages.SystemMessage":
-                return m.get("content", "")
-        return "Ты — полезный ассистент."
+                base_prompt = m.get("content", "")
+                break
+        
+        # Add a strict anti-hallucination instruction for markdown tables
+        anti_hallucination = (
+            "\n\nКРИТИЧЕСКИ ВАЖНО: При чтении таблиц или списков в формате Markdown "
+            "строго следи за тем, к какой сущности (городу, вузу) относится цена или дата. "
+            "Никогда не смешивай данные из соседних строк таблицы! Например, если спрашивают про Инсбрук, "
+            "не бери цену из строки для Линца."
+        )
+        return base_prompt + anti_hallucination
 
     def _extract_human_prompt(self, messages: list) -> str:
         for m in messages:
