@@ -5,10 +5,14 @@ import re
 import hashlib
 import yaml
 import json
+import sys
 from pathlib import Path
 from sqlalchemy import create_engine, text
-from google import genai
-from google.genai import types
+
+# Add parent directory to path to import crag module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from crag.llm_providers import get_llm
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -244,8 +248,17 @@ def _split_long_section(text: str, max_length: int = 800, overlap: int = 50) -> 
 # ── Main Indexing Logic ───────────────────────────────────────────────────
 
 async def index():
-    logger.info("Initializing pipeline without LangChain...")
-    
+    logger.info("Initializing indexing with multi-provider support...")
+
+    # Initialize LLM provider to get embedding dimensions
+    logger.info("Detecting embedding provider configuration...")
+    llm_provider = get_llm()
+
+    # Detect embedding dimensions by generating a test embedding
+    test_embedding = await llm_provider.embed(["test"])
+    embedding_dim = len(test_embedding[0])
+    logger.info(f"✅ Embedding provider: {llm_provider.config.embedding_provider}, dimensions: {embedding_dim}")
+
     # Check knowledge base state
     logger.info("Checking knowledge base state...")
     kb_dir = "knowledge_base"
@@ -255,7 +268,7 @@ async def index():
             if file.endswith('.md'):
                 md_files.append(os.path.join(root, file))
     md_files.sort()
-    
+
     hashes = []
     for path in md_files:
         with open(path, 'rb') as f:
@@ -265,7 +278,7 @@ async def index():
     # Get DB URL from yaml
     with open("configs/default.yaml", "r") as f:
         config = yaml.safe_load(f)
-        
+
     db_url_template = config.get("bot_db_connection")
     db_url = db_url_template.replace("${oc.env:POSTGRES_USER}", os.environ.get("POSTGRES_USER", "")) \
                             .replace("${oc.env:POSTGRES_PASSWORD}", os.environ.get("POSTGRES_PASSWORD", "")) \
@@ -273,47 +286,57 @@ async def index():
                             .replace("${oc.env:POSTGRES_DB}", os.environ.get("POSTGRES_DB", ""))
 
     engine = create_engine(db_url)
-    
+
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.execute(text("CREATE TABLE IF NOT EXISTS kb_sync_state (id INT PRIMARY KEY, hash TEXT)"))
-        result = conn.execute(text("SELECT hash FROM kb_sync_state WHERE id = 1")).fetchone()
+        conn.execute(text("CREATE TABLE IF NOT EXISTS kb_sync_state (id INT PRIMARY KEY, hash TEXT, embedding_dim INT, provider TEXT)"))
+        result = conn.execute(text("SELECT hash, embedding_dim, provider FROM kb_sync_state WHERE id = 1")).fetchone()
         old_hash = result[0] if result else None
+        old_dim = result[1] if result else None
+        old_provider = result[2] if result else None
 
-        # Ensure our target table exists
-        conn.execute(text("""
+        # Check if embedding provider or dimensions changed
+        provider_changed = old_provider != llm_provider.config.embedding_provider
+        dimension_changed = old_dim != embedding_dim
+
+        if provider_changed:
+            logger.info(f"🔄 Embedding provider changed: {old_provider} → {llm_provider.config.embedding_provider}")
+        if dimension_changed:
+            logger.info(f"🔄 Embedding dimensions changed: {old_dim} → {embedding_dim}")
+
+        # Drop and recreate table if dimensions changed
+        if dimension_changed or provider_changed:
+            logger.info("Recreating simple_documents table with new embedding dimensions...")
+            conn.execute(text("DROP TABLE IF EXISTS simple_documents CASCADE"))
+
+        # Ensure our target table exists with correct dimensions
+        conn.execute(text(f"""
             CREATE TABLE IF NOT EXISTS simple_documents (
                 id SERIAL PRIMARY KEY,
                 content TEXT,
                 metadata JSONB,
-                embedding vector(3072)
+                embedding vector({embedding_dim})
             )
         """))
-        
+
         # GIN index for JSONB metadata filtering
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_simple_documents_metadata "
             "ON simple_documents USING GIN (metadata)"
         ))
-        
-        # Ensure embedding column has explicit dimensions
-        conn.execute(text(
-            "ALTER TABLE simple_documents "
-            "ALTER COLUMN embedding TYPE vector(3072)"
-        ))
-        
-        # Drop legacy HNSW index (pgvector 2000-dim limit makes it unusable for 3072-d)
+
+        # Drop legacy HNSW index (pgvector 2000-dim limit makes it unusable for high-d embeddings)
         conn.execute(text(
             "DROP INDEX IF EXISTS idx_simple_documents_embedding_hnsw"
         ))
-        
+
         # Full-text search index for hybrid retrieval (BM25-like)
         # Combined simple + russian config for multilingual KB (German/English + Russian)
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_simple_documents_content_fts "
             "ON simple_documents USING GIN ((to_tsvector('simple', content) || to_tsvector('russian', content)))"
         ))
-        
+
         # Check if table has data. Even if hash matches, table might be empty
         count = conn.execute(text("SELECT count(*) FROM simple_documents")).scalar()
 
@@ -321,11 +344,11 @@ async def index():
     # Railway's pgvector doesn't support halfvec.  For a small knowledge base
     # the exact sequential scan is fast enough (~0.4 s including network).
 
-    if old_hash == current_hash and count > 0:
+    if old_hash == current_hash and count > 0 and not provider_changed and not dimension_changed:
         logger.info("✅ Knowledge base is unchanged since last deployment. Skipping indexing to save API limits.")
         return
 
-    logger.info("🔄 Knowledge base has changed or is empty. Clearing existing indexes and re-indexing...")
+    logger.info("🔄 Knowledge base has changed or provider changed. Clearing existing indexes and re-indexing...")
     with engine.begin() as conn:
         # We drop the old langchain payload and our new simple tables
         conn.execute(text("DROP TABLE IF EXISTS langchain_pg_embedding CASCADE"))
@@ -367,47 +390,52 @@ async def index():
     if not all_chunks:
         logger.warning("No documents found in knowledge_base/!")
         return
-        
-    logger.info(f"Loaded {len(all_chunks)} chunks total. Generating embeddings...")
-    client = genai.Client()
-    
+
+    logger.info(f"Loaded {len(all_chunks)} chunks total. Generating embeddings with {llm_provider.config.embedding_provider}...")
+
     batch_size = 100
     total_added = 0
-    
+
     for i in range(0, len(all_chunks), batch_size):
         batch = all_chunks[i : i + batch_size]
         logger.info(f"Adding batch {i//batch_size + 1} ({len(batch)} chunks)...")
-        
+
         texts_to_embed = [item["content"] for item in batch]
-        
-        # Google GenAI lets you embed a list of strings
-        response = client.models.embed_content(
-            model='models/gemini-embedding-001',
-            contents=texts_to_embed,
-        )
-        
-        embeddings = [e.values for e in response.embeddings]
-        
+
+        # Use LLM provider for embeddings (supports Google, NVIDIA, OpenAI)
+        embeddings = await llm_provider.embed(texts_to_embed)
+
         # Insert into DB
         with engine.begin() as conn:
             for item, emb in zip(batch, embeddings):
                 conn.execute(
-                    text("INSERT INTO simple_documents (content, metadata, embedding) VALUES (:c, :m, :e)"), 
+                    text("INSERT INTO simple_documents (content, metadata, embedding) VALUES (:c, :m, :e)"),
                     {"c": item["content"], "m": json.dumps(item["metadata"]), "e": str(emb)}
                 )
         total_added += len(batch)
-        
+
         if i + batch_size < len(all_chunks):
             logger.info("Sleeping 2s to avoid rate limits...")
             await asyncio.sleep(2)
 
     logger.info(f"Successfully indexed knowledge base. {total_added} chunks added.")
-    
-    # Save the new hash state
+
+    # Save the new hash state with provider and dimension info
     with engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO kb_sync_state (id, hash) VALUES (1, :hash) ON CONFLICT (id) DO UPDATE SET hash = EXCLUDED.hash"), 
-            {"hash": current_hash}
+            text("""
+                INSERT INTO kb_sync_state (id, hash, embedding_dim, provider)
+                VALUES (1, :hash, :dim, :provider)
+                ON CONFLICT (id) DO UPDATE SET
+                    hash = EXCLUDED.hash,
+                    embedding_dim = EXCLUDED.embedding_dim,
+                    provider = EXCLUDED.provider
+            """),
+            {
+                "hash": current_hash,
+                "dim": embedding_dim,
+                "provider": llm_provider.config.embedding_provider
+            }
         )
 
 if __name__ == "__main__":
