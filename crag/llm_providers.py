@@ -28,10 +28,22 @@ class LLMConfig:
     max_tokens: int = 4096
     top_p: float = 1.0
 
+    # Embedding settings
+    embedding_provider: Optional[str] = None  # "google", "nvidia", "openai"
+    embedding_model: Optional[str] = None
+    embedding_api_key: Optional[str] = None
+    embedding_base_url: Optional[str] = None
+
     @classmethod
     def from_env(cls) -> "LLMConfig":
         """Load config from environment variables"""
         provider = os.getenv("LLM_PROVIDER", "google").lower()
+
+        # Embedding config
+        embedding_provider = os.getenv("EMBEDDING_PROVIDER", provider).lower()
+        embedding_model = os.getenv("EMBEDDING_MODEL")
+        embedding_api_key = os.getenv("EMBEDDING_API_KEY")
+        embedding_base_url = os.getenv("EMBEDDING_BASE_URL")
 
         if provider == "google":
             return cls(
@@ -40,11 +52,27 @@ class LLMConfig:
                 api_key=os.getenv("GOOGLE_API_KEY", ""),
                 temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
                 max_tokens=int(os.getenv("LLM_MAX_TOKENS", "4096")),
+                embedding_provider=embedding_provider or "google",
+                embedding_model=embedding_model or "gemini-embedding-001",
+                embedding_api_key=embedding_api_key or os.getenv("GOOGLE_API_KEY", ""),
+                embedding_base_url=embedding_base_url,
             )
         elif provider in ["nvidia", "openai"]:
             base_url = os.getenv("OPENAI_BASE_URL")
             if provider == "nvidia" and not base_url:
                 base_url = "https://integrate.api.nvidia.com/v1"
+
+            # Default embedding settings for NVIDIA/OpenAI
+            if not embedding_base_url and embedding_provider == "nvidia":
+                embedding_base_url = "https://integrate.api.nvidia.com/v1"
+
+            if not embedding_model:
+                if embedding_provider == "nvidia":
+                    embedding_model = "nvidia/nv-embed-v1"
+                elif embedding_provider == "openai":
+                    embedding_model = "text-embedding-3-small"
+                else:
+                    embedding_model = "gemini-embedding-001"
 
             return cls(
                 provider=provider,
@@ -54,6 +82,10 @@ class LLMConfig:
                 temperature=float(os.getenv("LLM_TEMPERATURE", "1.0")),
                 max_tokens=int(os.getenv("LLM_MAX_TOKENS", "4096")),
                 top_p=float(os.getenv("LLM_TOP_P", "1.0")),
+                embedding_provider=embedding_provider or provider,
+                embedding_model=embedding_model,
+                embedding_api_key=embedding_api_key or os.getenv("NVIDIA_API_KEY" if provider == "nvidia" else "OPENAI_API_KEY", ""),
+                embedding_base_url=embedding_base_url,
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}")
@@ -79,61 +111,65 @@ class BaseLLMProvider:
 
 
 class GoogleLLMProvider(BaseLLMProvider):
-    """Google Gemini provider"""
+    """Google Gemini provider using new google-genai SDK"""
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
-        import google.generativeai as genai
-        genai.configure(api_key=config.api_key)
+        from google import genai
+        from google.genai import types
 
-        self.model = genai.GenerativeModel(
-            model_name=config.model,
-            generation_config={
-                "temperature": config.temperature,
-                "max_output_tokens": config.max_tokens,
-            }
-        )
-        self.embed_model = genai.GenerativeModel("gemini-embedding-001")
+        self.client = genai.Client(api_key=config.api_key)
+        self.model_name = config.model
+        self.types = types
+        self.config_obj = config
 
     async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Generate text response"""
-        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+        from crag.simple_rag import retry_on_503
 
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.model.generate_content(full_prompt)
+        config = self.types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            temperature=self.config_obj.temperature,
         )
-        return response.text
+
+        response = await retry_on_503(
+            self.client.aio.models.generate_content,
+            model=self.model_name,
+            contents=prompt,
+            config=config,
+        )
+        return response.text or ""
 
     async def generate_stream(self, prompt: str, system_prompt: Optional[str] = None) -> AsyncIterator[str]:
         """Generate streaming text response"""
-        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+        from crag.simple_rag import retry_on_503
 
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.model.generate_content(full_prompt, stream=True)
+        config = self.types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            temperature=self.config_obj.temperature,
         )
 
-        for chunk in response:
+        stream = await retry_on_503(
+            self.client.aio.models.generate_content_stream,
+            model=self.model_name,
+            contents=prompt,
+            config=config,
+        )
+
+        async for chunk in stream:
             if chunk.text:
                 yield chunk.text
 
     async def embed(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for texts"""
-        import google.generativeai as genai
+        from crag.simple_rag import retry_on_503
 
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: genai.embed_content(
-                model="models/gemini-embedding-001",
-                content=texts,
-                task_type="retrieval_document"
-            )
+        response = await retry_on_503(
+            self.client.aio.models.embed_content,
+            model="models/gemini-embedding-001",
+            contents=texts,
         )
-        return result['embedding']
+        return [list(emb.values) for emb in response.embeddings]
 
 
 class OpenAICompatibleProvider(BaseLLMProvider):
@@ -148,16 +184,30 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             base_url=config.base_url
         )
 
-        # For embeddings, use Google by default (can be overridden)
-        self.embed_provider = None
-        google_key = os.getenv("GOOGLE_API_KEY")
-        if google_key:
-            import google.generativeai as genai
-            genai.configure(api_key=google_key)
-            self.has_google_embed = True
+        # Initialize embedding client based on embedding_provider
+        self.embedding_provider = config.embedding_provider
+        self.embedding_model = config.embedding_model
+
+        if config.embedding_provider == "nvidia":
+            self.embedding_client = AsyncOpenAI(
+                api_key=config.embedding_api_key or config.api_key,
+                base_url=config.embedding_base_url or "https://integrate.api.nvidia.com/v1"
+            )
+        elif config.embedding_provider == "openai":
+            self.embedding_client = AsyncOpenAI(
+                api_key=config.embedding_api_key or config.api_key,
+                base_url=config.embedding_base_url or "https://api.openai.com/v1"
+            )
+        elif config.embedding_provider == "google":
+            # Use Google for embeddings
+            from google import genai
+            google_key = config.embedding_api_key or os.getenv("GOOGLE_API_KEY")
+            if not google_key:
+                raise ValueError("GOOGLE_API_KEY required for Google embeddings")
+            self.google_client = genai.Client(api_key=google_key)
+            self.embedding_client = None
         else:
-            self.has_google_embed = False
-            logger.warning("No GOOGLE_API_KEY found. Embeddings will not work unless using OpenAI embeddings.")
+            raise ValueError(f"Unsupported embedding provider: {config.embedding_provider}")
 
     async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Generate text response"""
@@ -206,29 +256,22 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 
     async def embed(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for texts"""
-        # Try OpenAI embeddings first
-        if self.config.base_url and "openai.com" in self.config.base_url:
-            response = await self.client.embeddings.create(
-                model="text-embedding-3-small",
+        if self.embedding_provider == "google":
+            # Use Google embeddings
+            from crag.simple_rag import retry_on_503
+            response = await retry_on_503(
+                self.google_client.aio.models.embed_content,
+                model="models/gemini-embedding-001",
+                contents=texts,
+            )
+            return [list(emb.values) for emb in response.embeddings]
+        else:
+            # Use OpenAI-compatible embeddings (NVIDIA, OpenAI)
+            response = await self.embedding_client.embeddings.create(
+                model=self.embedding_model,
                 input=texts
             )
             return [item.embedding for item in response.data]
-
-        # Fallback to Google embeddings
-        if self.has_google_embed:
-            import google.generativeai as genai
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: genai.embed_content(
-                    model="models/gemini-embedding-001",
-                    content=texts,
-                    task_type="retrieval_document"
-                )
-            )
-            return result['embedding']
-        else:
-            raise ValueError("No embedding provider available. Set GOOGLE_API_KEY or use OpenAI.")
 
 
 class LLMProviderFactory:
