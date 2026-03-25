@@ -19,6 +19,7 @@ pgvector==0.2.5
 # LLM / Embeddings
 google-genai
 google-api-core
+openai>=1.0.0
 
 # Observability
 langfuse>=2.0.0

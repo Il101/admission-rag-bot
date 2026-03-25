@@ -11,8 +11,8 @@ from jinja2 import BaseLoader, Environment, Undefined
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker as sa_sessionmaker
-from google import genai
-from google.genai import types
+
+from .llm_providers import get_llm, BaseLLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -234,10 +234,8 @@ class SimpleRAG:
     EMBEDDING_TRUNCATE_DIMS = 1536  # Set to None to disable truncation
 
     def __init__(self, db_engine, prompts_config: dict = None):
-        self.api_key = os.environ.get(
-            "GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY")
-        )
-        self.client = genai.Client(api_key=self.api_key)
+        # Initialize LLM provider (supports Google, OpenAI, NVIDIA, etc.)
+        self.llm_provider: BaseLLMProvider = get_llm()
 
         # Keep sync engine for backward-compat (used by indexing script)
         self.db_engine = db_engine
@@ -363,12 +361,11 @@ class SimpleRAG:
             return cached
 
         try:
-            response = await retry_on_503(
-                self.client.aio.models.embed_content,
-                model="models/gemini-embedding-001",
-                contents=text_input,
+            embeddings = await retry_on_503(
+                self.llm_provider.embed,
+                [text_input]
             )
-            embedding = list(response.embeddings[0].values)
+            embedding = list(embeddings[0]) if embeddings else []
 
             # Truncate for HNSW index support if enabled
             if truncate and self.EMBEDDING_TRUNCATE_DIMS:
@@ -436,13 +433,12 @@ class SimpleRAG:
 Используй конкретные термины, даты, названия."""
 
         try:
-            response = await retry_on_503(
-                self.client.aio.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.3),
+            hypothetical = await retry_on_503(
+                self.llm_provider.generate,
+                prompt=prompt,
+                system_prompt=None  # System prompt is embedded in the prompt
             )
-            hypothetical = (response.text or "").strip()
+            hypothetical = (hypothetical or "").strip()
             if hypothetical:
                 logger.info(
                     f"HyDE: '{question[:40]}...' → '{hypothetical[:60]}...'"
@@ -561,16 +557,12 @@ class SimpleRAG:
 {{"sub_questions": ["{question}"]}}"""
 
         try:
-            response = await retry_on_503(
-                self.client.aio.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                ),
+            response_text = await retry_on_503(
+                self.llm_provider.generate,
+                prompt=prompt,
+                system_prompt=None
             )
-            data = json.loads(response.text or "{}")
+            data = json.loads(response_text or "{}")
             sub_questions = data.get("sub_questions", [question])
 
             if len(sub_questions) > 1:
@@ -676,16 +668,12 @@ class SimpleRAG:
 Массив должен содержать ровно {len(docs)} оценок."""
 
         try:
-            response = await retry_on_503(
-                self.client.aio.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                ),
+            response_text = await retry_on_503(
+                self.llm_provider.generate,
+                prompt=prompt,
+                system_prompt=None
             )
-            data = json.loads(response.text or "{}")
+            data = json.loads(response_text or "{}")
             scores = data.get("scores", [])
 
             if len(scores) != len(docs):
@@ -725,16 +713,12 @@ class SimpleRAG:
         )
 
         try:
-            response = await retry_on_503(
-                self.client.aio.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.rewrite_system_prompt,
-                    temperature=0.0,
-                ),
+            rewritten = await retry_on_503(
+                self.llm_provider.generate,
+                prompt=user_prompt,
+                system_prompt=self.rewrite_system_prompt
             )
-            rewritten = (response.text or "").strip()
+            rewritten = (rewritten or "").strip()
             if rewritten:
                 logger.info(
                     f"Query rewrite: '{question[:60]}' → '{rewritten[:60]}'"
@@ -770,17 +754,12 @@ class SimpleRAG:
         )
 
         try:
-            response = await retry_on_503(
-                self.client.aio.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=batch_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.grading_system_prompt,
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                ),
+            response_text = await retry_on_503(
+                self.llm_provider.generate,
+                prompt=batch_prompt,
+                system_prompt=self.grading_system_prompt
             )
-            raw = (response.text or "{}").strip()
+            raw = (response_text or "{}").strip()
             data = json.loads(raw)
             scores = data.get("scores", [1] * len(docs))
 
@@ -833,45 +812,19 @@ class SimpleRAG:
             context=context,
         )
 
-        response_schema = {
-            "type": "OBJECT",
-            "properties": {
-                "answer": {
-                    "type": "STRING",
-                    "description": (
-                        "The main text of the response to the user question."
-                    ),
-                },
-                "suggested_questions": {
-                    "type": "ARRAY",
-                    "items": {"type": "STRING"},
-                    "description": (
-                        "3-4 suggested follow-up questions relevant "
-                        "to the current state."
-                    ),
-                },
-            },
-            "required": ["answer", "suggested_questions"],
-        }
-
+        # Note: response_schema is Gemini-specific, so we rely on the system prompt
+        # to ensure JSON structure. Non-Gemini providers will return JSON via prompt engineering.
         try:
-            stream = await retry_on_503(
-                self.client.aio.models.generate_content_stream,
-                model="gemini-2.5-flash",
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=sys_prompt,
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                    response_schema=response_schema,
-                ),
+            stream = self.llm_provider.generate_stream(
+                prompt=user_prompt,
+                system_prompt=sys_prompt
             )
 
             async for chunk in stream:
-                if chunk.text:
-                    yield chunk.text
+                if chunk:
+                    yield chunk
         except Exception as e:
-            logger.error(f"Error streaming from Gemini: {e}")
+            logger.error(f"Error streaming from LLM: {e}")
             yield json.dumps(
                 {
                     "answer": (
@@ -910,13 +863,12 @@ class SimpleRAG:
             f"{summary}"
         )
         try:
-            response = await retry_on_503(
-                self.client.aio.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.0),
+            compressed = await retry_on_503(
+                self.llm_provider.generate,
+                prompt=prompt,
+                system_prompt=None
             )
-            compressed = (response.text or "").strip()
+            compressed = (compressed or "").strip()
             if compressed and len(compressed) < len(summary):
                 logger.info(
                     "Summary compressed: %d → %d chars", len(summary), len(compressed)
@@ -973,15 +925,11 @@ class SimpleRAG:
     async def agenerate_json(self, prompt: str) -> str:
         try:
             response = await retry_on_503(
-                self.client.aio.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                ),
+                self.llm_provider.generate,
+                prompt=prompt,
+                system_prompt=None
             )
-            return response.text
+            return response
         except Exception as e:
             logger.error(f"Error generating JSON: {e}")
             return "{}"
@@ -1025,16 +973,12 @@ class SimpleRAG:
 {{"use_tool": false}}"""
 
         try:
-            response = await retry_on_503(
-                self.client.aio.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                ),
+            response_text = await retry_on_503(
+                self.llm_provider.generate,
+                prompt=prompt,
+                system_prompt=None
             )
-            data = json.loads(response.text or "{}")
+            data = json.loads(response_text or "{}")
 
             if data.get("use_tool"):
                 logger.info(
