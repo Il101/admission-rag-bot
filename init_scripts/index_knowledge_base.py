@@ -289,11 +289,37 @@ async def index():
 
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.execute(text("CREATE TABLE IF NOT EXISTS kb_sync_state (id INT PRIMARY KEY, hash TEXT, embedding_dim INT, provider TEXT)"))
-        result = conn.execute(text("SELECT hash, embedding_dim, provider FROM kb_sync_state WHERE id = 1")).fetchone()
-        old_hash = result[0] if result else None
-        old_dim = result[1] if result else None
-        old_provider = result[2] if result else None
+
+        # Create or migrate kb_sync_state table
+        # First, check if table exists with old schema
+        try:
+            result = conn.execute(text("SELECT * FROM kb_sync_state WHERE id = 1 LIMIT 1")).fetchone()
+            # Try to read from old schema (only hash column)
+            old_hash = result[0] if result else None
+            old_dim = None
+            old_provider = None
+            # Table exists, needs migration
+            logger.info("🔄 Migrating kb_sync_state table schema...")
+            conn.execute(text("""
+                ALTER TABLE kb_sync_state
+                ADD COLUMN IF NOT EXISTS embedding_dim INT,
+                ADD COLUMN IF NOT EXISTS provider TEXT
+            """))
+        except Exception:
+            # Table doesn't exist, create new one
+            conn.execute(text("CREATE TABLE IF NOT EXISTS kb_sync_state (id INT PRIMARY KEY, hash TEXT, embedding_dim INT, provider TEXT)"))
+            result = conn.execute(text("SELECT hash, embedding_dim, provider FROM kb_sync_state WHERE id = 1")).fetchone()
+            old_hash = result[0] if result else None
+            old_dim = result[1] if result else None
+            old_provider = result[2] if result else None
+
+        # If we got here from migration, read the full state now
+        if old_provider is None:
+            result = conn.execute(text("SELECT hash, embedding_dim, provider FROM kb_sync_state WHERE id = 1")).fetchone()
+            if result:
+                old_hash, old_dim, old_provider = result
+            else:
+                old_hash, old_dim, old_provider = None, None, None
 
         # Check if embedding provider or dimensions changed
         provider_changed = old_provider != llm_provider.config.embedding_provider
