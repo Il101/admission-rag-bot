@@ -364,7 +364,24 @@ async def index():
         ))
 
         # Check if table has data. Even if hash matches, table might be empty
-        count = conn.execute(text("SELECT count(*) FROM simple_documents")).scalar()
+        try:
+            count = conn.execute(text("SELECT count(*) FROM simple_documents")).scalar()
+            # Check the actual embedding column vector dimension
+            col_info = conn.execute(text("""
+                SELECT data_type FROM information_schema.columns
+                WHERE table_name='simple_documents' AND column_name='embedding'
+            """)).scalar()
+
+            # Parse vector dimension from data_type like "vector(3072)"
+            if col_info and 'vector(' in col_info:
+                actual_dim = int(col_info.split('(')[1].split(')')[0])
+                if actual_dim != embedding_dim and count > 0:
+                    logger.info(f"⚠️ Dimension mismatch: DB has {actual_dim}-dim vectors, provider has {embedding_dim}-dim")
+                    logger.info("🔄 Forcing re-index to update embeddings...")
+                    dimension_changed = True
+        except Exception as e:
+            logger.info(f"Could not check column info: {e}")
+            count = 0
 
     # NOTE: pgvector HNSW/IVFFlat indexes are limited to 2000 dims, and
     # Railway's pgvector doesn't support halfvec.  For a small knowledge base
