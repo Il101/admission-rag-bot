@@ -138,12 +138,53 @@ async def _stream_answer(
     ):
         accumulated += chunk
         now = time.monotonic()
-        
+
         match = answer_regex.search(accumulated)
         if match:
             display_text = match.group(1)
             display_text = display_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
-            
+
+            new_chars = len(display_text) - last_edit_len
+
+            if now - last_edit_time >= STREAM_EDIT_INTERVAL and new_chars >= STREAM_MIN_CHARS:
+                safe = sanitize_telegram_html(display_text + " ▌")
+                if safe.strip():
+                    await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
+                last_edit_len = len(display_text)
+                last_edit_time = now
+
+    return accumulated
+
+
+async def _stream_answer_with_tools(
+    msg, simple_rag, question: str, context_str: str,
+    chat_history: str, memory_context: str, tool_result: dict,
+    prefix: str = "",
+):
+    """Stream LLM generation with tool result, editing the Telegram message periodically.
+
+    Similar to _stream_answer but uses the tool-enhanced streaming method.
+    Returns the full accumulated response JSON text.
+    """
+    accumulated = prefix
+    last_edit_time = time.monotonic()
+    last_edit_len = len(prefix)
+
+    # Regex to extract partial answer from a JSON stream: {"answer": "..."}
+    answer_regex = re.compile(r'"answer":\s*"((?:[^"\\]|\\.)*)', re.DOTALL)
+
+    async for chunk in simple_rag.astream_answer_with_tools(
+        question, context_str, chat_history, memory_context, get_current_date(),
+        tool_result=tool_result,
+    ):
+        accumulated += chunk
+        now = time.monotonic()
+
+        match = answer_regex.search(accumulated)
+        if match:
+            display_text = match.group(1)
+            display_text = display_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+
             new_chars = len(display_text) - last_edit_len
 
             if now - last_edit_time >= STREAM_EDIT_INTERVAL and new_chars >= STREAM_MIN_CHARS:
@@ -283,9 +324,13 @@ async def _handle_question_core(
     question: str,
     onboarding_data: dict,
     db_session_factory=None,
+    use_hyde: bool = True,
+    use_tools: bool = True,
+    use_reranking: bool = True,
 ):
-    """Core logic: memory → rewrite → cache check → retrieve → grade → stream → send.
-    
+    """Core logic: memory → tools → rewrite → cache → retrieve → grade → rerank → stream → send.
+
+    Enhanced with HyDE, Function Calling, and Re-ranking.
     Shared by answer(), answer_to_replied(), and handle_suggested_question().
     """
     timings = {}
@@ -294,6 +339,7 @@ async def _handle_question_core(
     actual_question = question
     retrieved_count = 0
     doc_sources: list = []
+    tool_result = None
 
     # Always restore onboarding from DB if lost after bot restart
     onboarding_data = await _ensure_onboarding_loaded(context, db_session, tg_id)
@@ -316,12 +362,27 @@ async def _handle_question_core(
         )
         timings["rewrite"] = time.monotonic() - t0
 
-        # 1a. Check semantic answer cache
+        # 1b. Check if tool/function call is needed
+        if use_tools:
+            t0 = time.monotonic()
+            tool_needed = await simple_rag.acheck_tool_need(actual_question, memory_context_str)
+            timings["tool_check"] = time.monotonic() - t0
+
+            if tool_needed:
+                t0 = time.monotonic()
+                tool_result = await simple_rag.aexecute_tool(
+                    tool_needed["tool_name"],
+                    tool_needed["arguments"],
+                )
+                timings["tool_execute"] = time.monotonic() - t0
+                logger.info(f"[User {tg_id}] Tool executed: {tool_needed['tool_name']}")
+
+        # 1c. Check semantic answer cache
         t0 = time.monotonic()
         cached_response = await simple_rag.get_cached_answer(actual_question)
         timings["cache_check"] = time.monotonic() - t0
 
-        if cached_response:
+        if cached_response and not tool_result:  # Skip cache if tool was used
             clean_text, suggested = parse_suggested_buttons(cached_response)
             safe_text = sanitize_telegram_html(clean_text)
             keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
@@ -343,10 +404,15 @@ async def _handle_question_core(
                 ))
             return
 
-        # 2. Retrieve candidates
+        # 2. Retrieve candidates with HyDE
         t0 = time.monotonic()
         user_filters = _build_user_filters(onboarding_data)
-        docs = await simple_rag.aretrieve(actual_question, user_filters=user_filters)
+        docs = await simple_rag.aretrieve(
+            actual_question,
+            user_filters=user_filters,
+            use_hyde=use_hyde,
+            memory_context=memory_context_str,
+        )
         retrieved_count = len(docs)
         timings["retrieve"] = time.monotonic() - t0
 
@@ -354,6 +420,12 @@ async def _handle_question_core(
         t0 = time.monotonic()
         docs = await simple_rag.agrade_documents(actual_question, docs)
         timings["grade"] = time.monotonic() - t0
+
+        # 3b. Re-rank for better precision
+        if use_reranking and len(docs) > 4:
+            t0 = time.monotonic()
+            docs = await simple_rag.arerank_documents(actual_question, docs, top_k=6)
+            timings["rerank"] = time.monotonic() - t0
 
         # Collect source URLs from surviving docs for the pipeline log
         doc_sources = [
@@ -385,12 +457,18 @@ async def _handle_question_core(
 
         context_str = documents_to_context_str(docs)
 
-        # 4. Stream answer
+        # 4. Stream answer (with tool result if available)
         t0 = time.monotonic()
-        full_response = await _stream_answer(
-            msg, simple_rag, actual_question, context_str,
-            chat_history_str, memory_context_str,
-        )
+        if tool_result:
+            full_response = await _stream_answer_with_tools(
+                msg, simple_rag, actual_question, context_str,
+                chat_history_str, memory_context_str, tool_result,
+            )
+        else:
+            full_response = await _stream_answer(
+                msg, simple_rag, actual_question, context_str,
+                chat_history_str, memory_context_str,
+            )
         timings["generate"] = time.monotonic() - t0
 
         # Cache answer for future similar questions

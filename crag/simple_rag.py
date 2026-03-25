@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import asyncio
+import hashlib
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List, AsyncGenerator
@@ -226,6 +227,12 @@ class SimpleRAG:
     FTS_WEIGHT = 0.3
     VECTOR_WEIGHT = 0.7
 
+    # ── Embedding dimension settings ──────────────────────────────────────
+    # Gemini embeddings are 3072 dims, but pgvector HNSW only supports up to 2000
+    # Truncating to 1536 enables HNSW indexing while preserving most semantic info
+    EMBEDDING_FULL_DIMS = 3072
+    EMBEDDING_TRUNCATE_DIMS = 1536  # Set to None to disable truncation
+
     def __init__(self, db_engine, prompts_config: dict = None):
         self.api_key = os.environ.get(
             "GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY")
@@ -331,12 +338,26 @@ class SimpleRAG:
 
     # ── Embedding with cache ─────────────────────────────────────────────
 
-    async def get_embedding(self, text_input: str) -> List[float]:
+    async def get_embedding(
+        self, text_input: str, truncate: bool = True
+    ) -> List[float]:
+        """Get embedding for text, optionally truncated for HNSW support.
+
+        Args:
+            text_input: Text to embed
+            truncate: If True and EMBEDDING_TRUNCATE_DIMS is set, truncate embedding
+
+        Returns:
+            List of floats (embedding vector)
+        """
         if not text_input.strip():
             return []
 
-        # Check cache first
-        cache_key = hash(text_input[:512])
+        # Check cache first (use full text SHA256 to avoid collisions)
+        cache_key = hashlib.sha256(text_input.encode('utf-8')).hexdigest()
+        if truncate and self.EMBEDDING_TRUNCATE_DIMS:
+            cache_key = f"{cache_key}_t{self.EMBEDDING_TRUNCATE_DIMS}"
+
         cached = _embedding_cache.get_or_none(cache_key)
         if cached is not None:
             return cached
@@ -347,7 +368,12 @@ class SimpleRAG:
                 model="models/gemini-embedding-001",
                 contents=text_input,
             )
-            embedding = response.embeddings[0].values
+            embedding = list(response.embeddings[0].values)
+
+            # Truncate for HNSW index support if enabled
+            if truncate and self.EMBEDDING_TRUNCATE_DIMS:
+                embedding = embedding[:self.EMBEDDING_TRUNCATE_DIMS]
+
             _embedding_cache.put(cache_key, embedding)
             return embedding
         except Exception as e:
@@ -386,12 +412,66 @@ class SimpleRAG:
             {"user_level": json.dumps([level])},
         )
 
+    # ── HyDE (Hypothetical Document Embeddings) ────────────────────────
+
+    async def agenerate_hypothetical_doc(
+        self, question: str, memory_context: str = ""
+    ) -> str:
+        """Generate a hypothetical document that would answer the question.
+
+        This improves retrieval by creating an embedding that's closer to
+        the actual documents in the vector space.
+        """
+        context_hint = ""
+        if memory_context:
+            context_hint = f"\nКонтекст пользователя: {memory_context[:300]}"
+
+        prompt = f"""Представь, что ты пишешь идеальный фрагмент из базы знаний
+о поступлении в Австрию, который полностью отвечает на вопрос.
+
+Вопрос: {question}{context_hint}
+
+Напиши 2-3 информативных предложения как будто это выдержка из официального документа.
+НЕ отвечай на вопрос напрямую — просто напиши, как выглядел бы идеальный документ с ответом.
+Используй конкретные термины, даты, названия."""
+
+        try:
+            response = await retry_on_503(
+                self.client.aio.models.generate_content,
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.3),
+            )
+            hypothetical = (response.text or "").strip()
+            if hypothetical:
+                logger.info(
+                    f"HyDE: '{question[:40]}...' → '{hypothetical[:60]}...'"
+                )
+                return hypothetical
+        except Exception as e:
+            logger.warning(f"HyDE generation failed, using original query: {e}")
+        return question
+
     # ── Async DB retrieval (hybrid: vector + FTS) ────────────────────────
 
     async def aretrieve(
-        self, query: str, top_k: int = 6, user_filters: dict = None
+        self, query: str, top_k: int = 6, user_filters: dict = None,
+        use_hyde: bool = False, memory_context: str = ""
     ) -> List[Document]:
-        embedding = await self.get_embedding(query)
+        """Retrieve documents using hybrid search (vector + FTS).
+
+        Args:
+            query: The search query
+            top_k: Number of documents to retrieve
+            user_filters: Metadata filters (country_scope, level)
+            use_hyde: If True, generate hypothetical document for better embedding
+            memory_context: User context for HyDE generation
+        """
+        search_query = query
+        if use_hyde:
+            search_query = await self.agenerate_hypothetical_doc(query, memory_context)
+
+        embedding = await self.get_embedding(search_query)
         if not embedding:
             return []
 
@@ -451,6 +531,183 @@ class SimpleRAG:
                 for row in result
             ]
         return docs
+
+    # ── Query Decomposition ───────────────────────────────────────────────
+
+    async def adecompose_query(self, question: str) -> list[str]:
+        """Decompose a complex question into sub-questions.
+
+        Complex questions with multiple aspects are split for parallel retrieval.
+        Simple questions are returned as-is.
+
+        Returns:
+            List of sub-questions (1 element if question is simple)
+        """
+        prompt = f"""Проанализируй вопрос о поступлении в Австрию.
+Если вопрос СЛОЖНЫЙ (содержит несколько разных аспектов), разбей его на 2-3 простых под-вопроса.
+Если вопрос ПРОСТОЙ или касается одной темы, верни его без изменений.
+
+ПРИМЕРЫ:
+- "Какие документы нужны и какие дедлайны для TU Wien?" → ["Какие документы нужны для TU Wien?", "Какие дедлайны подачи в TU Wien?"]
+- "Как подать документы в Uni Wien?" → ["Как подать документы в Uni Wien?"]
+- "Сравни стоимость жизни в Вене и Граце, и какие там главные вузы?" → ["Стоимость жизни в Вене", "Стоимость жизни в Граце", "Главные вузы Вены и Граца"]
+
+Вопрос: {question}
+
+Ответь СТРОГО в JSON формате:
+{{"sub_questions": ["вопрос1", "вопрос2", ...]}}
+
+Если вопрос простой:
+{{"sub_questions": ["{question}"]}}"""
+
+        try:
+            response = await retry_on_503(
+                self.client.aio.models.generate_content,
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                ),
+            )
+            data = json.loads(response.text or "{}")
+            sub_questions = data.get("sub_questions", [question])
+
+            if len(sub_questions) > 1:
+                logger.info(
+                    f"Query decomposed: '{question[:50]}' → {len(sub_questions)} sub-questions"
+                )
+            return sub_questions if sub_questions else [question]
+        except Exception as e:
+            logger.warning(f"Query decomposition failed: {e}")
+            return [question]
+
+    async def aretrieve_decomposed(
+        self,
+        question: str,
+        top_k: int = 6,
+        user_filters: dict = None,
+        use_hyde: bool = False,
+        memory_context: str = "",
+    ) -> List[Document]:
+        """Retrieve with query decomposition for complex questions.
+
+        Decomposes the question, retrieves for each sub-question in parallel,
+        then merges and deduplicates results.
+        """
+        sub_questions = await self.adecompose_query(question)
+
+        if len(sub_questions) <= 1:
+            # Simple question — use regular retrieval
+            return await self.aretrieve(
+                question, top_k, user_filters, use_hyde, memory_context
+            )
+
+        # Parallel retrieval for each sub-question
+        per_query_k = max(3, top_k // len(sub_questions) + 1)
+        tasks = [
+            self.aretrieve(sq, per_query_k, user_filters, use_hyde, memory_context)
+            for sq in sub_questions
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Merge and deduplicate
+        seen_content = set()
+        merged = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning(f"Sub-query retrieval failed: {result}")
+                continue
+            for doc in result:
+                # Use first 200 chars as dedup key
+                content_key = doc.page_content[:200]
+                if content_key not in seen_content:
+                    seen_content.add(content_key)
+                    merged.append(doc)
+
+        logger.info(
+            f"Decomposed retrieval: {len(sub_questions)} queries → {len(merged)} unique docs"
+        )
+        return merged[:top_k]
+
+    # ── Re-ranking ────────────────────────────────────────────────────────
+
+    async def arerank_documents(
+        self,
+        question: str,
+        docs: List[Document],
+        top_k: int = 6,
+    ) -> List[Document]:
+        """Re-rank documents using LLM-based relevance scoring.
+
+        Applies after initial retrieval to improve precision.
+        Uses a single LLM call to score all documents 0-10.
+
+        Args:
+            question: The user's question
+            docs: Documents from initial retrieval
+            top_k: Number of top documents to return
+
+        Returns:
+            Re-ranked documents (top_k most relevant)
+        """
+        if len(docs) <= top_k:
+            return docs
+
+        # Build document snippets for scoring
+        docs_text = "\n\n".join([
+            f"[DOC_{i}]\n{doc.page_content[:400]}"
+            for i, doc in enumerate(docs)
+        ])
+
+        prompt = f"""Оцени релевантность каждого документа вопросу по шкале 0-10.
+10 = идеально отвечает на вопрос
+5 = частично релевантен
+0 = совсем не относится к вопросу
+
+ВОПРОС: {question}
+
+ДОКУМЕНТЫ:
+{docs_text}
+
+Ответь в JSON формате:
+{{"scores": [score_для_DOC_0, score_для_DOC_1, ...]}}
+
+Массив должен содержать ровно {len(docs)} оценок."""
+
+        try:
+            response = await retry_on_503(
+                self.client.aio.models.generate_content,
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                ),
+            )
+            data = json.loads(response.text or "{}")
+            scores = data.get("scores", [])
+
+            if len(scores) != len(docs):
+                logger.warning(
+                    f"Re-ranking returned {len(scores)} scores for {len(docs)} docs, skipping"
+                )
+                return docs[:top_k]
+
+            # Sort by score descending
+            scored_docs = list(zip(docs, scores))
+            scored_docs.sort(key=lambda x: x[1], reverse=True)
+
+            reranked = [doc for doc, _ in scored_docs[:top_k]]
+            logger.info(
+                f"Re-ranked {len(docs)} docs → top {top_k}, "
+                f"score range: {min(scores):.1f}-{max(scores):.1f}"
+            )
+            return reranked
+
+        except Exception as e:
+            logger.warning(f"Re-ranking failed, using original order: {e}")
+            return docs[:top_k]
 
     # ── Query rewriting ──────────────────────────────────────────────────
 
@@ -728,3 +985,102 @@ class SimpleRAG:
         except Exception as e:
             logger.error(f"Error generating JSON: {e}")
             return "{}"
+
+    # ── Tool/Function Calling ─────────────────────────────────────────────
+
+    async def acheck_tool_need(
+        self, question: str, memory_context: str = ""
+    ) -> dict | None:
+        """Check if the question requires a tool call.
+
+        Returns:
+            Dictionary with tool_name and arguments if tool needed,
+            None otherwise.
+        """
+        from crag.tools import get_tool_schemas
+
+        tool_schemas = get_tool_schemas()
+        tools_desc = json.dumps(tool_schemas, ensure_ascii=False, indent=2)
+
+        prompt = f"""Проанализируй вопрос пользователя и определи, нужен ли инструмент.
+
+ВОПРОС: {question}
+
+КОНТЕКСТ ПОЛЬЗОВАТЕЛЯ: {memory_context[:500] if memory_context else 'Нет'}
+
+ДОСТУПНЫЕ ИНСТРУМЕНТЫ:
+{tools_desc}
+
+ПРАВИЛА:
+1. Используй check_deadline ТОЛЬКО если спрашивают о конкретном дедлайне для конкретного вуза
+2. Используй calculate_budget ТОЛЬКО если спрашивают о расходах/бюджете в конкретном городе
+3. Используй get_document_checklist ТОЛЬКО если просят чек-лист документов
+
+Если вопрос общий или теоретический — НЕ используй инструменты.
+
+Ответь СТРОГО в JSON формате:
+{{"use_tool": true/false, "tool_name": "...", "arguments": {{...}}}}
+
+Если инструмент не нужен:
+{{"use_tool": false}}"""
+
+        try:
+            response = await retry_on_503(
+                self.client.aio.models.generate_content,
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                ),
+            )
+            data = json.loads(response.text or "{}")
+
+            if data.get("use_tool"):
+                logger.info(
+                    f"Tool needed: {data.get('tool_name')} "
+                    f"with args {data.get('arguments')}"
+                )
+                return {
+                    "tool_name": data.get("tool_name"),
+                    "arguments": data.get("arguments", {}),
+                }
+        except Exception as e:
+            logger.warning(f"Tool check failed: {e}")
+
+        return None
+
+    async def aexecute_tool(self, tool_name: str, arguments: dict) -> dict:
+        """Execute a tool and return the result."""
+        from crag.tools import execute_tool
+        return await execute_tool(tool_name, arguments)
+
+    async def astream_answer_with_tools(
+        self,
+        question: str,
+        context: str,
+        chat_history: str,
+        memory_context: str,
+        current_date: str,
+        tool_result: dict | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream answer, optionally incorporating tool results.
+
+        If tool_result is provided, it's added to the context for the LLM.
+        """
+        # Enhance context with tool result if available
+        enhanced_context = context
+        if tool_result:
+            tool_text = json.dumps(tool_result, ensure_ascii=False, indent=2)
+            enhanced_context = (
+                f"[РЕЗУЛЬТАТ ИНСТРУМЕНТА — используй эти ТОЧНЫЕ данные в ответе]\n"
+                f"{tool_text}\n\n"
+                f"[ДОКУМЕНТЫ ИЗ БАЗЫ ЗНАНИЙ]\n{context}"
+            )
+
+        # Use the regular streaming method with enhanced context
+        async for chunk in self.astream_answer(
+            question, enhanced_context, chat_history, memory_context, current_date
+        ):
+            yield chunk
+

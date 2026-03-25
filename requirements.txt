@@ -20,6 +20,9 @@ pgvector==0.2.5
 google-genai
 google-api-core
 
+# Observability
+langfuse>=2.0.0
+
 # Document Parsing
 beautifulsoup4==4.12.3
 lxml==5.2.2

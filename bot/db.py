@@ -138,6 +138,49 @@ class PipelineLog(Base):
     )
 
 
+class UserEntity(Base):
+    """Structured entity memory extracted from conversations.
+
+    Stores specific entities (universities, deadlines, documents, etc.)
+    mentioned by or relevant to the user for personalized responses.
+    """
+    __tablename__ = "user_entities"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tg_id: Mapped[int] = mapped_column(
+        ForeignKey("users.tg_id", ondelete="CASCADE"), index=True
+    )
+    entity_type: Mapped[str] = mapped_column(String(50))  # "university", "deadline", "document", "city", "program"
+    entity_value: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    source: Mapped[str] = mapped_column(String(50))  # "user_input", "extracted", "inferred"
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now(), nullable=True
+    )
+
+
+class ABTestLog(Base):
+    """Logs for A/B testing experiments."""
+    __tablename__ = "ab_test_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tg_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    experiment_name: Mapped[str] = mapped_column(String(100))
+    variant: Mapped[str] = mapped_column(String(50))
+    metric_name: Mapped[str] = mapped_column(String(100))
+    metric_value: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 @lru_cache(maxsize=1)
 def get_db_sessionmaker(conn_string: str) -> sessionmaker:
     engine = create_async_engine(
@@ -413,3 +456,110 @@ async def get_analytics_summary(session: AsyncSession, days: int = 7) -> dict:
         "feedback": fb_stats,
         "messages": {"total_last_period": total_messages},
     }
+
+
+# ── Entity Memory Functions ──────────────────────────────────────────────
+
+
+async def add_user_entity(
+    session: AsyncSession,
+    tg_id: int,
+    entity_type: str,
+    entity_value: str,
+    source: str = "extracted",
+    confidence: float = 1.0,
+) -> None:
+    """Add or update a user entity.
+
+    If an entity with the same type and value exists, updates the confidence.
+    """
+    # Check if entity exists
+    existing = await session.execute(
+        select(UserEntity).where(
+            UserEntity.tg_id == tg_id,
+            UserEntity.entity_type == entity_type,
+            UserEntity.entity_value == entity_value,
+        )
+    )
+    entity = existing.scalar_one_or_none()
+
+    if entity:
+        # Update confidence if higher
+        if confidence > entity.confidence:
+            entity.confidence = confidence
+    else:
+        # Create new entity
+        entity = UserEntity(
+            tg_id=tg_id,
+            entity_type=entity_type,
+            entity_value=entity_value,
+            source=source,
+            confidence=confidence,
+        )
+        session.add(entity)
+
+    await session.commit()
+
+
+async def get_user_entities(
+    session: AsyncSession,
+    tg_id: int,
+    entity_type: Optional[str] = None,
+) -> List[dict]:
+    """Get all entities for a user, optionally filtered by type."""
+    query = select(UserEntity).where(UserEntity.tg_id == tg_id)
+    if entity_type:
+        query = query.where(UserEntity.entity_type == entity_type)
+    query = query.order_by(UserEntity.confidence.desc(), UserEntity.updated_at.desc())
+
+    result = await session.execute(query)
+    entities = result.scalars().all()
+
+    return [
+        {
+            "type": e.entity_type,
+            "value": e.entity_value,
+            "confidence": e.confidence,
+            "source": e.source,
+        }
+        for e in entities
+    ]
+
+
+async def delete_user_entity(
+    session: AsyncSession,
+    tg_id: int,
+    entity_type: str,
+    entity_value: str,
+) -> bool:
+    """Delete a specific entity for a user."""
+    result = await session.execute(
+        delete(UserEntity).where(
+            UserEntity.tg_id == tg_id,
+            UserEntity.entity_type == entity_type,
+            UserEntity.entity_value == entity_value,
+        )
+    )
+    await session.commit()
+    return result.rowcount > 0
+
+
+async def add_ab_test_log(
+    session_factory,
+    tg_id: int,
+    experiment_name: str,
+    variant: str,
+    metric_name: str,
+    metric_value: float,
+) -> None:
+    """Log an A/B test metric."""
+    async with session_factory() as session:
+        log = ABTestLog(
+            tg_id=tg_id,
+            experiment_name=experiment_name,
+            variant=variant,
+            metric_name=metric_name,
+            metric_value=metric_value,
+        )
+        session.add(log)
+        await session.commit()

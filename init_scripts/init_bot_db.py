@@ -60,6 +60,8 @@ def migrate_memory_columns(engine):
                     t_grade DOUBLE PRECISION,
                     t_generate DOUBLE PRECISION,
                     t_total DOUBLE PRECISION NOT NULL,
+                    sources JSONB,
+                    error TEXT,
                     created_at TIMESTAMPTZ DEFAULT now()
                 )
             """))
@@ -67,6 +69,55 @@ def migrate_memory_columns(engine):
                 "CREATE INDEX IF NOT EXISTS idx_pipeline_logs_created "
                 "ON pipeline_logs(created_at)"
             ))
+            # Add sources and error columns if they don't exist (for existing tables)
+            conn.execute(text(
+                "ALTER TABLE pipeline_logs ADD COLUMN IF NOT EXISTS sources JSONB"
+            ))
+            conn.execute(text(
+                "ALTER TABLE pipeline_logs ADD COLUMN IF NOT EXISTS error TEXT"
+            ))
+
+            # User entities table (structured memory)
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS user_entities (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tg_id BIGINT REFERENCES users(tg_id) ON DELETE CASCADE,
+                    entity_type VARCHAR(50) NOT NULL,
+                    entity_value TEXT NOT NULL,
+                    confidence DOUBLE PRECISION DEFAULT 1.0,
+                    source VARCHAR(50) NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_user_entities_tg_id ON user_entities(tg_id)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_user_entities_type ON user_entities(entity_type)"
+            ))
+
+            # A/B test logs table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS ab_test_logs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tg_id BIGINT NOT NULL,
+                    experiment_name VARCHAR(100) NOT NULL,
+                    variant VARCHAR(50) NOT NULL,
+                    metric_name VARCHAR(100) NOT NULL,
+                    metric_value DOUBLE PRECISION NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_ab_test_logs_experiment "
+                "ON ab_test_logs(experiment_name, variant)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_ab_test_logs_created "
+                "ON ab_test_logs(created_at)"
+            ))
+
             conn.commit()
             logger.info("Memory columns + analytics tables migration applied successfully.")
         except Exception as e:

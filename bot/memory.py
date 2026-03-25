@@ -125,6 +125,172 @@ MOOD_KEYWORDS: dict[str, list[str]] = {
 }
 
 
+# ── Entity Extraction Patterns ────────────────────────────────────────────
+
+import re
+
+ENTITY_PATTERNS: dict[str, list[str]] = {
+    "university": [
+        r"(?i)\b(uni(?:versität)?|университет)\s+(wien|вена|graz|грац|innsbruck|инсбрук|salzburg|зальцбург|linz|линц)",
+        r"(?i)\b(tu|technische)\s+(wien|graz)",
+        r"(?i)\bboku\b",
+        r"(?i)\bwu\s+wien\b",
+        r"(?i)\bmeduni\s+wien\b",
+        r"(?i)\bjku\s+linz\b",
+        r"(?i)\bfh\s+\w+\b",
+    ],
+    "deadline": [
+        r"(\d{1,2})[./](\d{1,2})[./](20\d{2})",
+        r"до\s+(\d{1,2})\s+(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)",
+        r"дедлайн[а-я]*\s+(\d{1,2}[./]\d{1,2}[./]?\d{0,4})",
+    ],
+    "document": [
+        r"(?i)\b(аттестат|диплом|апостиль|нострификаци[яю]|справк[ау]|сертификат)\b",
+        r"(?i)\b(перевод|transcript|zulassungsbescheid)\b",
+    ],
+    "program": [
+        r"(?i)\b(bachelor|бакалавр|master|магистр|phd|докторант)\b",
+        r"(?i)\b(informatik|информатик|wirtschaft|экономик|medizin|медицин)\b",
+    ],
+    "city": [
+        r"(?i)\b(вен[аеу]|vienna|wien)\b",
+        r"(?i)\b(грац[е]?|graz)\b",
+        r"(?i)\b(инсбрук[е]?|innsbruck)\b",
+        r"(?i)\b(линц[е]?|linz)\b",
+        r"(?i)\b(зальцбург[е]?|salzburg)\b",
+    ],
+    "language_level": [
+        r"(?i)\b([ABC][12])\b",
+        r"(?i)\b(goethe|ösd|osd|testdaf|dsh|ielts|toefl)\b",
+    ],
+}
+
+
+def extract_entities(text: str) -> list[dict]:
+    """Extract structured entities from text using regex patterns.
+
+    Returns a list of dicts with keys: type, value, source
+    """
+    entities = []
+    text_lower = text.lower()
+
+    for entity_type, patterns in ENTITY_PATTERNS.items():
+        for pattern in patterns:
+            try:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                for match in matches:
+                    if isinstance(match, tuple):
+                        value = " ".join(m for m in match if m).strip()
+                    else:
+                        value = match.strip()
+
+                    if value and len(value) > 1:
+                        # Normalize common values
+                        value = _normalize_entity_value(entity_type, value)
+                        if value:
+                            entities.append({
+                                "type": entity_type,
+                                "value": value,
+                                "source": "extracted",
+                            })
+            except re.error:
+                continue
+
+    # Deduplicate
+    seen = set()
+    unique_entities = []
+    for e in entities:
+        key = (e["type"], e["value"].lower())
+        if key not in seen:
+            seen.add(key)
+            unique_entities.append(e)
+
+    return unique_entities
+
+
+def _normalize_entity_value(entity_type: str, value: str) -> str:
+    """Normalize entity values for consistency."""
+    value = value.strip()
+
+    if entity_type == "university":
+        # Normalize university names
+        normalizations = {
+            "universität wien": "Uni Wien",
+            "uni wien": "Uni Wien",
+            "университет вена": "Uni Wien",
+            "tu wien": "TU Wien",
+            "technische wien": "TU Wien",
+            "tu graz": "TU Graz",
+            "technische graz": "TU Graz",
+            "wu wien": "WU Wien",
+            "meduni wien": "MedUni Wien",
+            "jku linz": "JKU Linz",
+            "boku": "BOKU Wien",
+            "uni graz": "Uni Graz",
+            "universität graz": "Uni Graz",
+            "университет грац": "Uni Graz",
+            "uni innsbruck": "Uni Innsbruck",
+            "universität innsbruck": "Uni Innsbruck",
+            "университет инсбрук": "Uni Innsbruck",
+            "uni salzburg": "Uni Salzburg",
+            "universität salzburg": "Uni Salzburg",
+            "университет зальцбург": "Uni Salzburg",
+        }
+        return normalizations.get(value.lower(), value)
+
+    elif entity_type == "city":
+        normalizations = {
+            "вена": "Vienna", "вене": "Vienna", "вену": "Vienna",
+            "vienna": "Vienna", "wien": "Vienna",
+            "грац": "Graz", "граце": "Graz", "graz": "Graz",
+            "инсбрук": "Innsbruck", "инсбруке": "Innsbruck", "innsbruck": "Innsbruck",
+            "линц": "Linz", "линце": "Linz", "linz": "Linz",
+            "зальцбург": "Salzburg", "зальцбурге": "Salzburg", "salzburg": "Salzburg",
+        }
+        return normalizations.get(value.lower(), value)
+
+    elif entity_type == "program":
+        normalizations = {
+            "bachelor": "bachelor", "бакалавр": "bachelor",
+            "master": "master", "магистр": "master",
+            "phd": "phd", "докторант": "phd",
+        }
+        return normalizations.get(value.lower(), value.lower())
+
+    elif entity_type == "language_level":
+        # Normalize to uppercase
+        return value.upper()
+
+    return value
+
+
+async def extract_and_store_entities(
+    session_factory,
+    tg_id: int,
+    text: str,
+) -> list[dict]:
+    """Extract entities from text and store them in the database.
+
+    Returns the list of extracted entities.
+    """
+    from bot.db import add_user_entity
+
+    entities = extract_entities(text)
+
+    if entities:
+        async with session_factory() as session:
+            for entity in entities:
+                await add_user_entity(
+                    session,
+                    tg_id=tg_id,
+                    entity_type=entity["type"],
+                    entity_value=entity["value"],
+                    source=entity["source"],
+                )
+
+    return entities
+
+
 def _detect_stages(text: str) -> list[str]:
     """Detect which journey stages are mentioned in the given text."""
     text_lower = text.lower()
