@@ -42,12 +42,29 @@ LEVEL_TO_SCOPE: dict[str, str] = {
 }
 
 
+def _is_valid_answer(answer: str) -> bool:
+    """Check if answer is meaningful (not just punctuation or placeholder)."""
+    if not answer:
+        return False
+    # Remove whitespace and check if only punctuation/ellipsis
+    stripped = answer.strip()
+    if not stripped:
+        return False
+    # Check for placeholder-like responses (just dots, ellipsis, etc.)
+    if stripped in ("...", "…", ".", "..", "....", "—", "-"):
+        return False
+    # Must have at least some actual text (letters or digits)
+    import string
+    text_chars = [c for c in stripped if c not in string.punctuation and not c.isspace()]
+    return len(text_chars) >= 3
+
+
 def parse_suggested_buttons(text: str) -> tuple:
     """Extract suggested questions from the structured JSON response.
     Returns (clean_text, list_of_questions).
     """
     logger.debug(f"Parsing suggested buttons from: {text[:200]}...")
-    
+
     # Try to find a JSON block if it's wrapped in something
     json_text = text.strip()
     if "{" in json_text and "}" in json_text:
@@ -63,6 +80,14 @@ def parse_suggested_buttons(text: str) -> tuple:
         if isinstance(data, dict):
             answer = data.get("answer", "")
             suggested = data.get("suggested_questions", [])
+            # Validate answer is not just ellipsis or empty
+            if not _is_valid_answer(answer):
+                logger.warning(f"Invalid/empty answer in JSON: '{answer[:50] if answer else ''}'")
+                return (
+                    "К сожалению, не удалось сформировать ответ. "
+                    "Пожалуйста, переформулируйте вопрос или попробуйте позже.",
+                    suggested if isinstance(suggested, list) else []
+                )
             if isinstance(suggested, list):
                 return answer, suggested
         return text, []
@@ -71,19 +96,28 @@ def parse_suggested_buttons(text: str) -> tuple:
         # Fallback: attempt regex extraction
         ans_match = re.search(r'"answer":\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
         btns_match = re.search(r'"suggested_questions":\s*(\[[^\]]*\])', text, re.DOTALL)
-        
+
         ans = text
         btns = []
-        
+
         if ans_match:
             ans = ans_match.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
-        
+
         if btns_match:
             try:
                 btns = json.loads(btns_match.group(1))
             except:
                 btns = re.findall(r'"([^"]*)"', btns_match.group(1))
-        
+
+        # Validate the extracted answer
+        if not _is_valid_answer(ans):
+            logger.warning(f"Invalid/empty answer after regex extraction: '{ans[:50] if ans else ''}'")
+            return (
+                "К сожалению, не удалось сформировать ответ. "
+                "Пожалуйста, переформулируйте вопрос или попробуйте позже.",
+                btns
+            )
+
         return ans, btns
 
 
@@ -340,6 +374,7 @@ async def _handle_question_core(
     retrieved_count = 0
     doc_sources: list = []
     tool_result = None
+    response_delivered = False
 
     # Always restore onboarding from DB if lost after bot restart
     onboarding_data = await _ensure_onboarding_loaded(context, db_session, tg_id)
@@ -386,7 +421,9 @@ async def _handle_question_core(
             clean_text, suggested = parse_suggested_buttons(cached_response)
             safe_text = sanitize_telegram_html(clean_text)
             keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
-            await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            response_delivered = await _safe_edit_message(
+                msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard
+            )
             if suggested:
                 _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
             _store_qa(context, msg.message_id, question, clean_text)
@@ -404,10 +441,10 @@ async def _handle_question_core(
                 ))
             return
 
-        # 2. Retrieve candidates with HyDE
+        # 2. Retrieve candidates with HyDE and smart query routing
         t0 = time.monotonic()
         user_filters = _build_user_filters(onboarding_data)
-        docs = await simple_rag.aretrieve(
+        docs = await simple_rag.aretrieve_smart(
             actual_question,
             user_filters=user_filters,
             use_hyde=use_hyde,
@@ -442,7 +479,9 @@ async def _handle_question_core(
             if suggested:
                 _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
 
-            await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            response_delivered = await _safe_edit_message(
+                msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard
+            )
             _store_qa(context, msg.message_id, question, clean_text)
             await add_chat_messages(db_session, tg_id, question, clean_text)
             timings["total"] = time.monotonic() - pipeline_start
@@ -484,7 +523,9 @@ async def _handle_question_core(
 
         # Combined keyboard: suggested questions + feedback (👍/👎)
         keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
-        await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        response_delivered = await _safe_edit_message(
+            msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard
+        )
         if suggested:
             _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
 
@@ -520,6 +561,10 @@ async def _handle_question_core(
                 cache_hit=False, docs_retrieved=retrieved_count, docs_after_grading=0,
                 timings=timings, sources=doc_sources, error=err_str,
             ))
+        # If the user already received the final answer, don't send a second
+        # "processing error" message due to a late side-effect failure.
+        if response_delivered:
+            return
         raise
 
 

@@ -1,0 +1,281 @@
+# German Language Requirements for Austrian Universities
+# SSOT: Certificate types, levels, critical gotchas
+# Last verified: 2026-03-01
+
+id: german-requirements
+
+# What each level unlocks
+levels:
+  a2:
+    unlocks:
+      - "Zulassung submission (application)"
+      - "VWU/VGUH enrollment"
+    notes: "Minimum for starting the admission process"
+
+  b2:
+    unlocks:
+      - "Direct enrollment at Uni Graz"
+      - "Direct enrollment at BOKU Wien"
+      - "Direct enrollment at Uni Innsbruck (most programs)"
+      - "Direct enrollment at Uni Salzburg"
+      - "Direct enrollment at JKU Linz"
+      - "Most FH programs"
+    notes: "Sufficient for B2-requirement universities (not Vienna!)"
+
+  c1:
+    unlocks:
+      - "Direct enrollment at TU Wien"
+      - "Direct enrollment at Uni Wien"
+      - "Direct enrollment at WU Wien"
+      - "Direct enrollment at MedUni Wien"
+      - "Direct enrollment at TU Graz (since 2026)"
+      - "Direct enrollment at MedUni Innsbruck"
+    notes: "Required for all major Vienna universities"
+
+# Certificate types by level
+certificates:
+  a2:
+    - name: ÖSD Zertifikat A2
+      organization: ÖSD
+      where: "ÖSD centers in Austria and abroad"
+    - name: Goethe-Zertifikat A2
+      organization: Goethe-Institut
+      where: "Goethe-Institut worldwide"
+    - name: ÖIF Test A2 (Integrationsprüfung)
+      organization: ÖIF Austria
+      where: "Austria + some CIS countries"
+    - name: telc Deutsch A2
+      organization: telc GmbH
+      where: "telc centers"
+    - name: DTÖ A2 (Deutsch Test für Österreich)
+      organization: ÖIF
+      where: "Austria only"
+    - name: DSD I (Deutsches Sprachdiplom)
+      organization: KMK
+      where: "German schools abroad"
+    - name: Sprachzentrum A2/2
+      organization: "EU/EEA university language center"
+      where: "European university language centers"
+
+  b2:
+    - name: ÖSD Zertifikat B2
+      organization: ÖSD
+    - name: Goethe-Zertifikat B2
+      organization: Goethe-Institut
+    - name: ÖIF Test B2
+      organization: ÖIF
+    - name: telc Deutsch B2
+      organization: telc GmbH
+    - name: TestDaF TDN3/4 (mixed)
+      organization: FaDaF
+      notes: "TDN3 in some parts = B2 level"
+
+  c1:
+    - name: ÖSD Zertifikat C1
+      organization: ÖSD
+      cost_range: "€120-190"
+      from_russia: "Limited availability 2025/26"
+      notes: "Accepted everywhere in Austria"
+    - name: Goethe-Zertifikat C1
+      organization: Goethe-Institut
+      cost_range: "€180-230"
+      from_russia: "Yes (Moscow / online)"
+      notes: "Worldwide recognition, high prestige"
+    - name: telc Deutsch C1 Hochschule
+      organization: telc GmbH
+      cost_range: "€150-200"
+      from_russia: "Rarely available"
+      notes: "Created specifically for universities"
+    - name: DSH2 (Deutsche Sprachprüfung für Hochschulzugang)
+      organization: German universities
+      cost_range: "€150-200"
+      from_russia: "NO - only in Germany!"
+      notes: "IMPRACTICAL for Russia/Austria applicants"
+    - name: TestDaF TDN4
+      organization: FaDaF
+      cost_range: "€175-195"
+      from_russia: "Yes (online since 2021)"
+      requirement: "TDN4 in ALL 4 parts"
+      notes: "Available online from anywhere"
+    - name: DSD II - C1 (Deutsches Sprachdiplom II)
+      organization: KMK
+      notes: "German schools abroad"
+    - name: Ergänzungsprüfung Deutsch
+      organization: OeAD / VWU
+      cost: 66
+      notes: "After VWU - equivalent to C1, accepted by all Austrian universities, NEVER EXPIRES"
+    - name: Sprachzentrum Uni Wien C1/2
+      organization: Uni Wien
+      notes: "Only if studied at Uni Wien"
+
+# CRITICAL GOTCHAS
+gotchas:
+  testdaf_tdn4_not_tdn5:
+    title: "TestDaF: TDN4, NOT TDN5!"
+    severity: critical
+    description: |
+      For Austrian universities (including TU Wien, WU Wien), TDN4 in ALL 4 parts = C1.
+      TDN5 = C2, NOT REQUIRED.
+    requirements:
+      leseverstehen: TDN4
+      hoerverstehen: TDN4
+      schriftlicher_ausdruck: TDN4
+      muendlicher_ausdruck: TDN4
+    warning: "TDN3 in even ONE part = NOT sufficient for C1 requirements"
+
+  dsh_only_germany:
+    title: "DSH - Only in Germany"
+    severity: critical
+    description: |
+      DSH (Deutsche Sprachprüfung für Hochschulzugang) CANNOT be taken in Russia or Austria.
+      Only German universities administer it, usually after conditional admission.
+    recommendation: "Use TestDaF or ÖSD C1 instead"
+
+  goethe_b2_not_vienna:
+    title: "Goethe B2 ≠ Vienna admission"
+    severity: critical
+    description: |
+      Goethe-Zertifikat B2 is accepted for VWU and B2-requirement universities.
+      But TU Wien, Uni Wien, WU Wien require C1!
+    recommendation: "If targeting Vienna → get Goethe C1 or ÖSD C1"
+
+  certificate_validity:
+    title: "Certificate validity: 2 years"
+    severity: high
+    description: |
+      Certificates (ÖSD, Goethe, TestDaF, telc) are valid for 2 YEARS from EXAM DATE.
+      Not certificate date, not submission date - the EXAM date itself.
+    example: "Exam in April 2024 → valid until April 2026"
+    exceptions_never_expire:
+      - "Ergänzungsprüfung Deutsch (VWU exam)"
+      - "School certificates where instruction was in German"
+      - "University degrees where instruction was in German"
+
+  vwu_lock_trap:
+    title: "VWU-Lock Trap"
+    severity: critical
+    description: |
+      If you enroll in VWU with conditional admission and OFFICIALLY REGISTER in VWU courses,
+      many universities (especially TU Wien) will ONLY accept Ergänzungsprüfung for final enrollment.
+      You CANNOT bring a new external certificate (ÖSD C1 / Goethe C1) to "jump out" early.
+    recommendation: "Choose your path (external certificate OR VWU) BEFORE enrolling in VWU courses"
+
+# Requirements by university
+requirements_by_university:
+  tu_wien:
+    level: C1
+    certificates: ["ÖSD C1", "Goethe C1", "telc C1 Hochschule", "DSH2", "TestDaF TDN4", "DSD II"]
+  uni_wien:
+    level: C1
+    certificates: ["ÖSD C1", "Goethe C1", "telc C1 Hochschule", "DSH2", "TestDaF TDN4", "DSD II", "Sprachzentrum Uni Wien C1/2"]
+  wu_wien:
+    level: C1
+    certificates: ["ÖSD C1", "Goethe C1", "telc C1 Hochschule", "DSH2", "TestDaF TDN4", "DSD II"]
+  meduni_wien:
+    level: C1
+    certificates: ["ÖSD C1", "Goethe C1", "telc C1 Hochschule", "DSH2", "TestDaF TDN4", "DSD II"]
+  meduni_innsbruck:
+    level: C1
+    certificates: ["ÖSD C1", "Goethe C1", "telc C1 Hochschule", "DSH2", "TestDaF TDN4", "DSD II"]
+  uni_graz:
+    level: B2
+    certificates: ["ÖSD B2", "Goethe B2", "ÖIF A2+", "DTÖ A2+", "TestDaF TDN3/4"]
+  tu_graz:
+    level: C1
+    certificates: ["ÖSD C1", "Goethe C1"]
+    notes: "C1 requirement since 2026"
+  boku_wien:
+    level: B2
+    certificates: ["ÖSD B2", "Goethe B2", "analogues"]
+  uni_innsbruck:
+    level: B2_to_C1
+    notes: "Depends on program"
+  jku_linz:
+    level: B2
+    certificates: "Standard set"
+  uni_salzburg:
+    level: B2
+    certificates: "Standard set"
+  fh_general:
+    level: B2
+    certificates: ["ÖSD B2", "Goethe B2"]
+
+# Exam costs and availability
+exam_costs:
+  osd:
+    organization: "Österreichisches Sprachdiplom Deutsch"
+    website: osd.at
+    levels: "A1-C2"
+    cost_range: "€100-190"
+    availability_russia: "Limited 2025/26"
+    availability_austria: "VHS Wien, ÖSD centers"
+    max_recognition_in_austria: true
+
+  goethe:
+    organization: "Goethe-Institut"
+    website: goethe.de
+    levels: "A1-C2"
+    cost_c1: "€180-230"
+    availability_russia: "Moscow, online"
+    availability_austria: "Goethe Institut Wien"
+    worldwide_recognition: true
+
+  testdaf:
+    organization: "FaDaF"
+    website: testdaf.de
+    levels: "TDN3-TDN5"
+    cost: "€175-195"
+    online_available: true
+    availability_russia: "Online"
+    for_austria: "TDN4 in all 4 parts = C1"
+
+  telc_c1_hochschule:
+    organization: "telc GmbH"
+    cost: "€150-200"
+    accepted_by: ["TU Wien", "WU Wien", "Uni Wien"]
+    designed_for_universities: true
+    availability_austria: "Sprachschule Aktiv, others"
+
+  oif:
+    organization: "ÖIF Austria"
+    levels: ["A2", "B1", "B2"]
+    cost: "€200-220"
+    warning: "NO C1 level available - not sufficient for C1 requirements"
+
+  dto:
+    name: "Deutsch Test für Österreich"
+    organization: "ÖIF"
+    since: 2019
+    levels: "A2-B2"
+    cost: "€150-200"
+    warning: "Not for C1 requirements"
+
+# Strategy recommendations
+recommended_strategy:
+  tu_wien_uni_wien_wu_wien_direct:
+    path: "Goethe C1 (online from Russia) or TestDaF TDN4 (online)"
+  uni_graz_boku:
+    path: "ÖSD B2 or Goethe B2 - sufficient"
+  tu_graz_since_2026:
+    path: "C1 required for enrollment"
+  no_b2_via_vwu:
+    path: "ÖSD A2 or Goethe A2 → VWU → Ergänzungsprüfung"
+  fast_and_cheap:
+    path: "TestDaF online (TDN4) - €175, available from anywhere"
+  maximum_recognition:
+    path: "Goethe C1 - accepted worldwide"
+
+# English programs exception
+english_programs:
+  german_required: false
+  notes: "For English Master and PhD programs, German certificate (A2/C1) is NOT required. Only English B2/C1 needed."
+  phd_exception: "German only needed if dissertation is written in German"
+
+# Exam schedule aggregator
+exam_schedule_portal: "sprachportal.at/kurse-und-pruefungen/pruefungstermine/"
+
+source_urls:
+  - https://www.tuwien.at/en/studies/admission/bachelors-programmes/admission-with-an-international-school-leaving-certificate/competence-in-german
+  - https://vorstudienlehrgang.oead.at/en/
+  - https://www.osd.at/en/
+last_verified: 2026-03-01

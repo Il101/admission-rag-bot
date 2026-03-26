@@ -1,0 +1,356 @@
+id: uni-wien
+
+name:
+  de: Universität Wien
+  en: University of Vienna
+  ru: Венский университет
+
+city: Wien
+website: https://univie.ac.at
+admission_portal: https://uspace.univie.ac.at
+ranking: "QS Top 150 (2025)"
+students_count: 92000
+founded: 1365
+
+# Дедлайны подачи документов
+deadlines:
+  # Bachelor Non-EU
+  - semester: WS2026/27
+    category: non-eu
+    level: [bachelor]
+    submission:
+      start: 2026-06-22
+      end: 2026-08-03
+    enrollment:
+      start: 2026-07-13
+      end: 2026-10-31
+    notes: "Non-EU дедлайн 3 августа (EU — 5 сентября). Обработка 10-12 недель."
+    source_url: https://studieren.univie.ac.at/en/admission/application-and-admission-periods/
+    last_verified: 2026-03-01
+
+  - semester: SS2027
+    category: non-eu
+    level: [bachelor]
+    submission:
+      start: 2026-11-16
+      end: 2027-01-07
+    enrollment:
+      start: 2027-01-11
+      end: 2027-03-31
+    source_url: https://studieren.univie.ac.at/en/admission/application-and-admission-periods/
+    last_verified: 2026-03-01
+
+  # Bachelor EU
+  - semester: WS2026/27
+    category: eu
+    level: [bachelor]
+    submission:
+      start: 2026-06-22
+      end: 2026-09-05
+    enrollment:
+      start: 2026-07-13
+      end: 2026-10-31
+    source_url: https://studieren.univie.ac.at/en/admission/application-and-admission-periods/
+    last_verified: 2026-03-01
+
+  # Master Non-EU (стандартные)
+  - semester: WS2026/27
+    category: non-eu
+    level: [master]
+    programs: standard
+    submission:
+      start: 2026-06-22
+      end: 2026-08-03
+    enrollment:
+      start: 2026-07-13
+      end: 2026-10-31
+    source_url: https://studieren.univie.ac.at/en/admission/application-and-admission-periods/
+    last_verified: 2026-03-01
+
+  # Master с вступительными испытаниями
+  - semester: WS2026/27
+    category: all
+    level: [master]
+    programs: with-entrance-exam
+    submission:
+      start: 2026-03-02
+      end: 2026-04-07
+    notes: "Для Master со вступительными испытаниями — ранние дедлайны"
+    source_url: https://studieren.univie.ac.at/en/admission/application-and-admission-periods/
+    last_verified: 2026-03-01
+
+# Требования к немецкому языку
+language_requirements:
+  german:
+    direct_admission: C1
+    vwu_admission: A2
+    notes: "Uni Wien требует C1 (как TU Wien, но в отличие от Uni Graz/Innsbruck где B2)"
+    certificates:
+      c1:
+        - name: ÖSD Zertifikat C1
+        - name: Goethe-Zertifikat C1
+        - name: TestDaF TDN4
+          notes: "TDN4 в КАЖДОМ разделе (если хоть один TDN3 — не C1!)"
+        - name: DSH-2
+        - name: DSH-3
+        - name: telc Deutsch C1 Hochschule
+        - name: ÖIF-Test C1
+        - name: Matura из немецкоязычной школы 4+ лет
+    certificate_validity_years: 2
+    source_url: https://studieren.univie.ac.at/en/admission/german-language-proficiency/
+    last_verified: 2026-03-01
+
+  english:
+    required_for: master-english-programs
+    min_level: B2
+    notes: "C1 для программ кафедры английского языка. C2 для Translation!"
+    certificates:
+      - name: TOEFL iBT
+      - name: IELTS Academic
+      - name: Cambridge CAE
+      - name: Cambridge CPE
+    source_url: https://studieren.univie.ac.at/en/admission/
+    last_verified: 2026-03-01
+
+# Стоимость обучения
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://studieren.univie.ac.at/en/tuition-fee/
+    last_verified: 2026-03-01
+
+  - category: eu
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    source_url: https://studieren.univie.ac.at/en/tuition-fee/
+    last_verified: 2026-03-01
+
+  - category: ukraine
+    amount: 0
+    currency: EUR
+    period: semester
+    notes: "Защитный статус"
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+# Вступительные экзамены
+entrance_exams:
+  registration:
+    portal: https://aufnahmeverfahren.univie.ac.at
+    period:
+      start: 2026-03-02
+      end: 2026-05-04
+    cost:
+      amount: 50
+      currency: EUR
+      notes: "За каждую программу отдельно"
+
+  programs:
+    - name: Psychology
+      places: 485
+      exam_date: 2026-07-06
+      format:
+        - part: A
+          weight: 50
+          content: "Знания по психологии (по официальному скрипту)"
+        - part: B
+          weight: 25
+          content: "Понимание научных текстов + логические выводы"
+        - part: C
+          weight: 25
+          content: "Когнитивные способности"
+      source_url: https://aufnahmeverfahren.univie.ac.at
+      last_verified: 2026-03-01
+
+    - name: Political Science
+      places: 570
+      exam_date: 2026-07-16  # или 17 июля
+      source_url: https://aufnahmeverfahren.univie.ac.at
+      last_verified: 2026-03-01
+
+    - name: Business Administration
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: International Business Administration
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Economics
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Computer Science
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Business Informatics
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Biology
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Chemistry
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Pharmacy
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Law (Rechtswissenschaften)
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Teacher Education
+      exam_date_range: 2026-06-22 to 2026-06-26
+      portal: https://zulassunglehramt.at
+      last_verified: 2026-03-01
+
+  notes:
+    - "Экзамен один раз в год (июль). Не сдал — следующий шанс июль 2027."
+    - "Регистрация на экзамен ДО подачи основного заявления в u:space"
+
+# Программы на английском
+programs_english:
+  bachelor:
+    - name: Mathematical Foundations of Data Science
+      notes: "Единственная программа бакалавриата полностью на английском. Немецкий НЕ требуется!"
+
+  master:
+    economics:
+      - Applied Economics
+      - Business Analytics
+      - Banking and Finance
+      - Global Demography
+    humanities:
+      - Anglophone Literatures and Cultures
+      - Arabic Linguistics
+      - Global History and Global Studies
+      - Cognition Behavior and Neurobiology (CoBeNe)
+    sciences:
+      - Astronomy
+      - Botany
+      - Biological Chemistry
+      - Bioinformatics
+    other:
+      - Spatial Data Science and GeoCommunication
+      - Governing Socio-Ecological Transformations
+
+# VWU специфика для Uni Wien
+vwu:
+  name: VWU Wien (Vorstudienlehrgang der Wiener Universitäten)
+  applies: true
+  address: "Sechshauser Straße 33A (секретариат) / 72 (курсы), 1150 Wien"
+  website: https://vorstudienlehrgang.oead.at/de/wien
+
+  costs:
+    direct_track:
+      amount_range: "530-630"
+      currency: EUR
+      period: semester
+      eligibility: "Беженцы, граждане LDC стран. Граждане СНГ НЕ попадают!"
+    kooperationspartner:
+      amount_range: "1800-2000"
+      currency: EUR
+      period: semester
+      providers: ["die Berater®", "Sprachenzentrum Uni Wien", "ZIB Training"]
+      notes: "Для всех остальных"
+
+  ergaenzungspruefungen:
+    - subject: Deutsch
+      cost: 132
+      notes: "€66 письменный + €66 устный"
+    - subject: Englisch
+      cost: 132
+      notes: "€66 письменный + €66 устный"
+    - subject: Mathematik
+      cost: 132
+      notes: "€66 письменный + €66 устный"
+    - subject: Physik
+      cost: 46
+    - subject: Chemie
+      cost: 46
+    - subject: Biologie
+      cost: 46
+    - subject: Geschichte
+      cost: 46
+    - subject: Geographie
+      cost: 46
+
+  trap: "ПРАВИЛО EPD: Если зачислен в VWU — единственное доказательство C1 это EPD от VWU. Нельзя сдать ÖSD/Goethe на стороне!"
+  max_semesters: 4
+  notes:
+    - "Можно сдать Ergänzungsprüfungen БЕЗ прохождения курсов (если уже знаешь материал)"
+    - "Нельзя делать предрегистрацию из-за границы"
+  source_url: https://studieren.univie.ac.at/en/admission/non-degree-programme/university-preparation-programme-of-the-vienna-universities-vwu/
+  last_verified: 2026-03-01
+
+# Подача документов
+submission:
+  method: online_only
+  portal: https://uspace.univie.ac.at
+  identity_verification: ["online_video", "in_person"]
+  notes:
+    - "Единственный крупный австрийский вуз с полностью онлайн подачей"
+    - "Online-Erstzulassung (видеозвонок) — можно зачислиться не приезжая в Вену!"
+    - "Паспорт — JPEG/PNG (не PDF!)"
+    - "Аттестат + апостиль + перевод — всё в одном PDF"
+
+  documents:
+    - name: Паспорт или ID
+      format: JPEG или PNG
+      required: true
+    - name: Аттестат о среднем образовании
+      format: PDF
+      required: true
+      legalization: apostille
+      translation: sworn_translator
+    - name: Транскрипт
+      format: PDF
+      required: true
+    - name: Сертификат немецкого языка
+      format: PDF
+      required: true
+    - name: Диплом/транскрипт вуза
+      format: PDF
+      required: conditional
+      condition: "Если учился в вузе"
+
+  source_url: https://studieren.univie.ac.at/en/admission/bachelordiploma-programmes/zulassung/non-eueea-with-little-german/
+  last_verified: 2026-03-01
+
+# Контакты
+contacts:
+  admission:
+    name: Teaching Affairs and Study Services — Studienzulassung
+    contact_form: https://studieren.univie.ac.at/en/contact-form/
+    phone: "+43 1 4277-10600"
+    phone_hours: "Пн и Чт 12:30–13:30 только!"
+    address: "Universitätsring 1, 1010 Wien (Eingang A, EG)"
+
+  entrance_exams:
+    website: https://aufnahmeverfahren.univie.ac.at
+    contact: https://aufnahmeverfahren.univie.ac.at/en/contact
+
+  vwu:
+    address_office: "Sechshauser Straße 33A/2. Stock, 1150 Wien"
+    address_courses: "Sechshauser Straße 72, 1150 Wien"
+    email: ["vwu@vwu.at", "vwu-koordination@oead.at"]
+    website: https://vorstudienlehrgang.oead.at/de/wien

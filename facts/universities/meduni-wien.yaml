@@ -1,0 +1,383 @@
+id: meduni-wien
+
+name:
+  de: Medizinische Universität Wien
+  en: Medical University of Vienna
+  ru: Медицинский университет Вены
+
+city: Wien
+website: https://meduniwien.ac.at
+medat_portal: https://medizinstudieren.at
+students_count: 8000
+founded: "1365 (в составе Uni Wien), 2004 (самостоятельный)"
+description: "Крупнейший и старейший медицинский университет немецкоязычного мира"
+
+# Программы
+programs:
+  - name: Humanmedizin (Human Medicine)
+    type: Diplom
+    duration: "12 семестров (6 лет)"
+    language: german
+    degree: "Dr. med. univ."
+
+  - name: Zahnmedizin (Dentistry)
+    type: Diplom
+    duration: "10 семестров (5 лет)"
+    language: german
+    degree: "Dr. med. dent."
+
+  - name: Medical Informatics
+    type: Master
+    duration: "4 семестра"
+    language: english
+    degree: "Master of Science"
+
+programs_notes:
+  - "Медицина и стоматология — DIPLOMSTUDIUM, не Bachelor/Master"
+  - "Степень соответствует профессиональной квалификации врача"
+
+# КЛЮЧЕВЫЕ ДАТЫ 2026
+key_dates_2026:
+  registration_open: 2026-03-02
+  registration_deadline: 2026-03-31
+  registration_fee: 110
+  medat_date: 2026-07-03
+  results: "32-я календарная неделя (3–9 августа 2026)"
+  admission_period: "Август–сентябрь 2026"
+  semester_start: 2026-10-01
+
+  critical_notes:
+    - "Регистрация закрывается 31 МАРТА — ровно через месяц!"
+    - "Никакой Nachfrist (дополнительного срока) НЕТ!"
+    - "MedAT проводится ОДИН РАЗ В ГОД"
+    - "Пропустил = следующий шанс только июль 2027"
+
+  source_url: https://www.medizinstudieren.at/allgemeine-informationen/news/news/termine-und-fristen-aufnahmeverfahren-2026/
+  last_verified: 2026-03-01
+
+# КВОТЫ — критически важно для Non-EU!
+quotas:
+  humanmedizin_wien:
+    total_places: 704
+
+    austria_quote:
+      percentage: 75
+      places: 528
+      condition: "Аттестат получен в Австрии (любое гражданство)"
+
+    eu_quote:
+      percentage: 20
+      places: 141
+      condition: "Граждане EU/EEA с аттестатом НЕ из Австрии"
+
+    non_eu_quote:
+      percentage: 5
+      places: 35
+      condition: "Граждане не-EU с аттестатом не из Австрии"
+
+    gewidmete_studienplaetze:
+      description: "Целевые места для работы на благо общества"
+      max_places: 85
+      within: austria_quote
+      available_from: "2024/25"
+
+  zahnmedizin_wien:
+    total_places: 80
+    non_eu_places: "~4"
+
+  distribution_process:
+    - "1. Лучшие 528 из AT-квоты получают места"
+    - "2. Оставшиеся AT + все EU смешиваются → лучшие 141 получают места"
+    - "3. Все оставшиеся (включая Non-EU) → лучшие 35 получают места"
+    - "→ Non-EU с очень высоким баллом МОЖЕТ попасть в финальный пул!"
+
+  quota_determination:
+    austria: "Аттестат получен в Австрии"
+    eu: "Гражданин EU, аттестат из другой EU-страны"
+    non_eu: "Гражданин России/СНГ, аттестат из России"
+    strategy: "Если Non-EU → переезд в Австрию на аттестат переводит в AT-квоту с 75% мест!"
+
+  source_url: https://www.medizinstudieren.at/studienplaetze-und-kontingentregelung/studienplaetze/
+  last_verified: 2026-03-01
+
+# Требования к немецкому
+language_requirements:
+  german:
+    for_registration: not_required
+    for_medat: not_required
+    for_enrollment: C1
+    notes: "Можно участвовать в MedAT без немецкого, но C1 нужен ПРИ ЗАЧИСЛЕНИИ"
+
+    certificates:
+      - ÖSD Zertifikat C1 (Oberstufe Deutsch)
+      - Goethe-Zertifikat C1
+      - telc Deutsch C1 Hochschule
+      - TestDaF TDN4  # MedUni принимает TDN4, не TDN5
+      - DSH2
+      - DSD II
+      - Language center certificate C1/2
+      - Диплом австрийской/немецкой школы (автоматически)
+      - "Степень 3+ лет на немецком языке"
+
+    certificate_validity_years: 3  # В отличие от 2 лет в большинстве вузов!
+
+    vwu_path: "Если немецкий недостаточен → VWU → EPD. Только после EPD можно зачислиться."
+    latin: "В некоторых случаях требуется Ergänzungsprüfung по латыни"
+
+    source_url: https://www.meduniwien.ac.at/web/en/studies-further-education/application-admission/medicine-and-dentistry-degree/admission-requirements/knowledge-of-the-german-language/
+    last_verified: 2026-03-01
+
+# MedAT-H (Humanmedizin)
+medat_h:
+  duration: "Целый день (~08:00–17:00)"
+  total_tasks: 201
+  total_time_minutes: 228
+
+  structure:
+    - block: BMS
+      name: "Basiskenntnistest Medizinische Studien"
+      content: "Биология, химия, физика, математика"
+      tasks: 94
+      time_minutes: 75
+      weight: 40
+
+    - block: TV
+      name: "Textverständnis"
+      content: "Понимание немецких текстов"
+      tasks: 12
+      time_minutes: 35
+      weight: 10
+
+    - block: KFF
+      name: "Kognitive Fähigkeiten & Fertigkeiten"
+      content: "Когнитивные способности, импликации"
+      time_minutes: 88
+      weight: 40
+      subtests:
+        - Figuren falten
+        - Zahlenfolgen
+        - Wortflüssigkeit
+        - Implikationen erkennen (IMP)
+        - Konzentrierte Aufmerksamkeit
+        - Merkfähigkeit
+
+    - block: SEK
+      name: "Sozial-emotionale Kompetenzen"
+      content: "Ситуационные суждения"
+      time_minutes: 30
+      weight: 10
+
+  bms_topics:
+    biology: ["Клеточная биология", "Генетика", "Анатомия и физиология", "Экология и эволюция"]
+    chemistry: ["Атомное строение", "Химические реакции", "Органическая химия", "pH", "Термохимия"]
+    physics: ["Механика", "Электричество", "Оптика", "Термодинамика"]
+    mathematics: ["Алгебра", "Геометрия", "Вероятность", "Функции"]
+
+  source_url: https://www.medizinstudieren.at/der-aufnahmetest-medat/testinhalte/testinhalte-humanmedizin/
+  last_verified: 2026-03-01
+
+# MedAT-Z (Zahnmedizin)
+medat_z:
+  total_tasks: "~189"
+  total_time_minutes: 273
+
+  structure:
+    - block: BMS
+      tasks: 94
+      time_minutes: 75
+      weight: 40
+
+    - block: MF
+      name: "Manuelle Fertigkeiten"
+      tasks: 8
+      time_minutes: 90
+      weight: 20
+      subtests:
+        - name: "Formen spiegeln (30 мин)"
+          description: "Зеркальное вырисовывание форм"
+        - name: "Draht biegen (30 мин)"
+          description: "Сгибание проволоки по образцу"
+
+    - block: KFF
+      time_minutes: 78
+      weight: 30
+      notes: "У стоматологов НЕТ подтеста Implikationen erkennen (IMP)"
+
+    - block: SEK
+      time_minutes: 30
+      weight: 10
+
+  notes:
+    - "У стоматологов НЕТ блока Textverständnis"
+    - "MF — полная неожиданность для большинства, нужно тренировать!"
+    - "Тренировочные комплекты продаются (~€30)"
+
+  source_url: https://www.medizinstudieren.at/der-aufnahmetest-medat/testinhalte/testinhalte-zahnmedizin/
+  last_verified: 2026-03-01
+
+# Стоимость MedAT
+medat_cost:
+  registration_fee: 110
+  payment_deadline: 2026-03-31
+  payment_method: "Онлайн при регистрации"
+  refund: false
+  notes:
+    - "€110 платится ДО дедлайна"
+    - "Невозвратный взнос — даже если заболел"
+    - "Можно выбрать Wien, Graz, Innsbruck или Linz — потом не изменить"
+
+# Стоимость обучения
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://www.meduniwien.ac.at/web/en/studies-further-education/application-admission/tuition-fees/
+    last_verified: 2026-03-01
+
+  - category: eu_over_time
+    amount: 363.36
+    currency: EUR
+    period: semester
+    notes: "EU студенты платят только если превысили Regelstudienzeit + 2 семестра"
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 388.56
+    last_verified: 2026-03-01
+
+  - category: eu_in_time
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+  - category: ukraine
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+  - category: ldc_countries
+    amount: 0
+    notes: "Граждане наименее развитых стран (Афганистан, Йемен и др.)"
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+# Подготовка к MedAT
+preparation:
+  official_materials:
+    - name: VMC Stichwortlisten
+      description: "Официальные тематические списки BMS"
+      cost: free
+      url: "medizinstudieren.at → Testinhalte"
+    - name: Beispielaufgaben
+      description: "Примеры задач"
+
+  commercial_courses:
+    - VMC Vienna Medical Classes  # Офлайн/онлайн, признан самым эффективным
+    - MedBreaker
+    - StudyMed
+    - MedGurus
+    - MedAT Vorbereitung
+    - Comenia Akademie
+
+  recommended_timelines:
+    bms: "3–4 месяца"
+    kff: "1–2 месяца ежедневной тренировки"
+    tv: "1 месяц (если C1 немецкий)"
+    mf: "1 месяц + тренировочный комплект (~€30)"
+    sek: "1–2 недели"
+
+  start_recommendation: "6–9 месяцев до теста (октябрь/ноябрь для июля)"
+
+# Процедура регистрации
+registration_process:
+  - step: 1
+    action: "Перейти на medizinstudieren.at"
+    details: "Выбрать вуз (Wien/Graz/Innsbruck/Linz)"
+
+  - step: 2
+    action: "Заполнить онлайн-форму"
+    fields:
+      - "Studienrichtung: Humanmedizin или Zahnmedizin (изменить нельзя!)"
+      - "Standort: Vienna"
+      - "Kontingent: Nicht-EU-Quote для граждан не-EU"
+      - "Личные данные"
+
+  - step: 3
+    action: "Оплатить €110"
+    deadline: 2026-03-31
+    method: "Онлайн (банковская карта, Sofortüberweisung)"
+
+  - step: 4
+    action: "Тест-день (3 июля 2026)"
+    bring:
+      - "Паспорт/ID + подтверждение регистрации"
+      - "Синяя или чёрная ручка (HB карандаш нельзя!)"
+    prohibited: "Электронные устройства"
+    arrive: "За 30-60 минут до начала"
+
+  - step: 5
+    action: "Результаты (3–9 августа 2026)"
+    where: "Личный кабинет на medizinstudieren.at"
+    shows: "Свой балл + балл отсечения + получил ли место"
+
+  - step: 6
+    action: "Личное зачисление в MedUni Wien"
+    required: true
+    location: "Alser Straße 4, 1090 Wien"
+    documents:
+      - "Паспорт (оригинал)"
+      - "Аттестат + апостиль + перевод (оригинал)"
+      - "Сертификат немецкого C1 (оригинал)"
+      - "Studienplatzzusage"
+      - "Виза D или ВНЖ (если Non-EU)"
+      - "Meldezettel"
+
+# Временная шкала для Non-EU из России
+timeline_non_eu:
+  - month: "Март 2026"
+    action: "Зарегистрироваться на MedAT + оплатить €110"
+  - month: "3 июля"
+    action: "Сдать тест"
+  - month: "Начало августа"
+    action: "Получить результаты"
+  - month: "Сразу"
+    action: "Подавать на визу D"
+  - month: "Август–сентябрь"
+    action: "Приехать в Вену + Meldezettel + зачисление"
+  - month: "1 октября"
+    action: "Начало семестра"
+
+timeline_non_eu_notes:
+  - "Виза D из посольства: 1–6 месяцев (обычно 2-3 в Москве)"
+  - "Часто Non-EU студенты пропускают первый семестр"
+
+# Контакты
+contacts:
+  admissions:
+    name: "Studies and Examinations Department"
+    address: "Alser Straße 4 (Hof 2, Tür 2N), 1090 Wien"
+    email: studien@meduniwien.ac.at
+    phone: "+43-1-40160-10040"
+    hours: "Пн, Ср, Пт 9:00–12:00 (только по записи)"
+
+  medat:
+    portal: https://medizinstudieren.at
+    notes: "Управляется совместно всеми 4 медицинскими университетами Австрии"

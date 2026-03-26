@@ -1,0 +1,269 @@
+id: uni-salzburg
+
+name:
+  de: Paris Lodron Universität Salzburg
+  en: University of Salzburg
+  ru: Зальцбургский университет
+  short: PLUS
+
+city: Salzburg
+website: https://plus.ac.at
+admission_portal: https://online.uni-salzburg.at
+students_count: 18000
+founded: 1622
+alliance: CIVIS  # Европейский университетский альянс
+
+# КРИТИЧНО: Личное присутствие обязательно!
+submission:
+  method: online_then_in_person
+  notes:
+    - "В отличие от Uni Wien (видеозвонок) — Uni Salzburg требует ЛИЧНОГО присутствия"
+    - "Нельзя завершить процесс онлайн!"
+    - "Для доступа к PLUS.place и email обязательна 2FA"
+
+  steps:
+    - "Онлайн-подача через PLUSonline"
+    - "Ожидание решения (несколько месяцев)"
+    - "Личная явка в Office of Admissions"
+    - "Получение студенческого билета"
+
+  address: "Kapitelgasse 4-6, 5020 Salzburg (Hauptgebäude, EG)"
+
+  source_url: https://www.plus.ac.at/studium/vor-dem-studium/zulassungsvoraussetzungen/
+  last_verified: 2026-03-01
+
+# Дедлайны
+deadlines:
+  - semester: WS2026/27
+    category: non-eu
+    level: [bachelor, master]
+    submission_deadline: 2026-08-10
+    semester_start: 2026-10-01
+    payment_deadline: 2026-09-05
+    notes: "Обработка занимает НЕСКОЛЬКО МЕСЯЦЕВ — подавай КАК МОЖНО РАНЬШЕ!"
+    source_url: https://www.plus.ac.at/studium/fristen-und-termine/
+    last_verified: 2026-03-01
+
+  - semester: SS2027
+    category: non-eu
+    level: [bachelor, master]
+    submission_deadline: 2027-01-10
+    payment_deadline: 2027-02-05
+    source_url: https://www.plus.ac.at/studium/fristen-und-termine/
+    last_verified: 2026-03-01
+
+# Вступительные экзамены
+entrance_exams:
+  psychology:
+    places: 200
+    exam_date: 2026-07-14
+    registration_deadline: 2026-04-30  # НЕ 4 мая как в Вене!
+    registration_portal: https://aufnahmeverfahren.univie.ac.at
+    duration: "2.5 часа (150 минут)"
+    cost: 50
+    format: "только письменный, Multiple Choice"
+
+    structure:
+      - part: A (Theorie)
+        content: "Знания психологии по скрипту 'Psycho...logisch'"
+        weight: 50
+      - part: B (Formal/Analytisch)
+        content: "Логическое мышление, простая математика/статистика"
+        weight: 25
+      - part: C (Englisch)
+        content: "Понимание короткого англоязычного научного текста"
+        weight: 25
+
+    unique_feature: "В итоговый рейтинг входят ОЦЕНКИ АТТЕСТАТА! Отличает от Вены, Граца, Инсбрука."
+
+    statistics_2024:
+      registered: 687
+      participated: 443
+      places: 200
+      required_percentile: "топ 45%"
+      thresholds:
+        top_10_percent: "~49/60"
+        top_30_percent: "~37/60"
+
+    source_url: https://aufnahmeverfahren.univie.ac.at
+    last_verified: 2026-03-01
+
+  teacher_education:
+    portal: https://zulassunglehramt.at
+    exam_period: "22–26 июня 2026"
+    notes: "Не сдал → зачисление в 2026/27 НЕВОЗМОЖНО"
+
+  sport_sciences:
+    type: "Eignungstest (тест физической пригодности)"
+    source_url: https://plus.ac.at/soe/studium/aufnahmeverfahren/
+
+# Требования к языкам — НИЖЕ чем в Вене!
+language_requirements:
+  german:
+    submission_minimum: A2
+    enrollment: B2
+    notes: "Uni Salzburg требует B2 (не C1 как Uni Wien) — менее строго!"
+    certificates:
+      b2:
+        - ÖSD Zertifikat B2
+        - Goethe-Zertifikat B2
+        - TestDaF TDN4
+        - DSH-2
+        - telc Deutsch B2/C1
+      c1:
+        - ÖSD Zertifikat C1
+        - Goethe-Zertifikat C1
+    certificate_validity_years: 2
+    source_url: https://www.plus.ac.at/studium/vor-dem-studium/zulassungsvoraussetzungen/
+    last_verified: 2026-03-01
+
+  preparation_courses:
+    notes: "Нет отдельного центрального VWU как в Вене"
+    options:
+      - "Частные языковые курсы в Зальцбурге"
+      - "Подготовительная программа OeAD"
+      - "Самостоятельная подготовка → пересдача сертификата"
+    recommendation: "Лучше подать с готовым B2, чем ждать решения с условием"
+
+# Стоимость
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://www.plus.ac.at/studium/vor-dem-studium/studienbeitrag/
+    last_verified: 2026-03-01
+
+  - category: eu
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+# Факультеты
+faculties:
+  - name: Kulturwissenschaften
+    programs: ["Лингвистика", "Литература", "Философия", "История искусств", "Музыковедение"]
+
+  - name: Gesellschaftswissenschaften
+    programs: ["Политология", "История", "Социология"]
+
+  - name: Rechts- und Wirtschaftswissenschaften
+    programs: ["Law (Jus)", "Economics", "Business"]
+
+  - name: Naturwissenschaften und Lebenswissenschaften
+    programs: ["Biologie", "Chemie", "Geographie", "Physik"]
+
+  - name: Digitale und Analytische Wissenschaften
+    programs: ["Informatik", "Mathematik", "AI", "Data Science"]
+
+  - name: Katholische Theologie
+    programs: ["Theologie", "Religionspädagogik"]
+
+# Сильные направления
+strong_programs:
+  - name: Rechtswissenschaften (право)
+    notes: "Сильная традиция, крупный факультет"
+  - name: Theologie
+    notes: "Один из ведущих теологических факультетов Австрии"
+  - name: Sportwissenschaften
+    notes: "Известная программа, хорошая инфраструктура"
+  - name: Geographie и Geoinformatik
+    notes: "Активные исследования, Erasmus+"
+  - name: Musikwissenschaft
+    notes: "Логично для Зальцбурга (родина Моцарта)"
+
+# Программы на английском
+programs_english:
+  bachelor:
+    notes: "Большинство Bachelor — ТОЛЬКО немецкий"
+
+  master:
+    - name: Applied Image and Signal Processing (AISE)
+      notes: "Joint Degree с FH Salzburg"
+    - name: Human-Computer Interaction and Design (HCIE)
+      notes: "Joint Degree с FH Salzburg"
+    - name: Geoinformatics (AGI)
+      language: english
+      requirement: "C1 English"
+      notes: "Международная программа"
+
+# CIVIS альянс
+civis_alliance:
+  description: "Альянс 12 европейских университетов"
+  partners:
+    - Aix-Marseille
+    - Sapienza Roma
+    - Université Libre de Bruxelles
+    - Stockholm
+    - UCM Madrid
+    - Humboldt Berlin
+    - "и другие"
+  benefits: "Студенты могут проходить курсы в других вузах альянса с первого года"
+
+# Документы
+required_documents:
+  online:
+    - name: Паспорт
+      format: "скан всех страниц с данными"
+    - name: Аттестат о среднем образовании
+      legalization: apostille
+    - name: Перевод аттестата
+      notes: "Англоязычные документы принимаются БЕЗ перевода на немецкий!"
+    - name: Транскрипт + перевод
+    - name: Немецкий сертификат
+      validity: 2 years
+
+  in_person:
+    - Паспорт (оригинал)
+    - Аттестат (оригинал)
+    - Zulassungsbescheid
+    - "Свидетельство о браке/смене имени (если есть)"
+
+  notes: "Uni Salzburg проверяет ОРИГИНАЛЫ лично — скан не заменяет оригинал!"
+
+  source_url: https://www.plus.ac.at/studium/vor-dem-studium/zulassungsvoraussetzungen/information-fuer-internationale-studieninteressierte/
+  last_verified: 2026-03-01
+
+# Медицина
+medicine:
+  available: false
+  notes: "Медицина в Зальцбурге — это Paracelsus Medizinische Privatuniversität (PMU), отдельный ЧАСТНЫЙ вуз. PLUS — гуманитарно-научный профиль."
+
+# Инфраструктура
+infrastructure:
+  - name: PLUSonline
+    url: https://online.uni-salzburg.at
+    purpose: "Зачисление, расписание, оценки"
+  - name: PLUS-Login
+    url: https://login.sbg.ac.at
+    purpose: "SSO для всех систем"
+  - name: ÖH Salzburg
+    url: https://oeh-salzburg.at
+    purpose: "Студенческий союз — правовая помощь, жильё"
+
+# Контакты
+contacts:
+  admissions:
+    name: Studienabteilung (Admissions Office)
+    address: "Kapitelgasse 4-6, 5020 Salzburg (Hauptgebäude, EG)"
+    phone: "+43 662 8044-0"
+    website: https://plus.ac.at/studium/studienabteilung/
+    faq: https://plus.ac.at/studium/studienabteilung/faqs/
+
+  international:
+    name: International Relations
+    website: https://plus.ac.at/abteilung-fuer-internationale-beziehungen/
+    purpose: "Признание документов, обмен"
+
+  oeh:
+    website: https://oeh-salzburg.at
+    services: "Юридическая консультация бесплатно для всех студентов"

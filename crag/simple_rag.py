@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker as sa_sessionmaker
 
 from .llm_providers import get_llm, BaseLLMProvider
+from .query_router import classify_query, QueryType, get_search_weights
 
 logger = logging.getLogger(__name__)
 
@@ -228,14 +229,15 @@ class SimpleRAG:
     VECTOR_WEIGHT = 0.7
 
     # ── Embedding dimension settings ──────────────────────────────────────
-    # Gemini embeddings are 3072 dims, but pgvector HNSW only supports up to 2000
-    # Truncating to 1536 enables HNSW indexing while preserving most semantic info
-    EMBEDDING_FULL_DIMS = 3072
-    EMBEDDING_TRUNCATE_DIMS = 1536  # Set to None to disable truncation
+    # Truncation is optional and disabled by default.
+    # If enabled via env, MUST match how vectors were indexed in DB.
+    EMBEDDING_TRUNCATE_DIMS = None
 
     def __init__(self, db_engine, prompts_config: dict = None):
         # Initialize LLM provider (supports Google, OpenAI, NVIDIA, etc.)
         self.llm_provider: BaseLLMProvider = get_llm()
+        trunc_env = os.getenv("EMBEDDING_TRUNCATE_DIMS", "").strip()
+        self.embedding_truncate_dims = int(trunc_env) if trunc_env else self.EMBEDDING_TRUNCATE_DIMS
 
         # Keep sync engine for backward-compat (used by indexing script)
         self.db_engine = db_engine
@@ -353,8 +355,8 @@ class SimpleRAG:
 
         # Check cache first (use full text SHA256 to avoid collisions)
         cache_key = hashlib.sha256(text_input.encode('utf-8')).hexdigest()
-        if truncate and self.EMBEDDING_TRUNCATE_DIMS:
-            cache_key = f"{cache_key}_t{self.EMBEDDING_TRUNCATE_DIMS}"
+        if truncate and self.embedding_truncate_dims:
+            cache_key = f"{cache_key}_t{self.embedding_truncate_dims}"
 
         cached = _embedding_cache.get_or_none(cache_key)
         if cached is not None:
@@ -368,8 +370,8 @@ class SimpleRAG:
             embedding = list(embeddings[0]) if embeddings else []
 
             # Truncate for HNSW index support if enabled
-            if truncate and self.EMBEDDING_TRUNCATE_DIMS:
-                embedding = embedding[:self.EMBEDDING_TRUNCATE_DIMS]
+            if truncate and self.embedding_truncate_dims:
+                embedding = embedding[:self.embedding_truncate_dims]
 
             _embedding_cache.put(cache_key, embedding)
             return embedding
@@ -451,14 +453,14 @@ class SimpleRAG:
     # ── Async DB retrieval (hybrid: vector + FTS) ────────────────────────
 
     async def aretrieve(
-        self, query: str, top_k: int = 6, user_filters: dict = None,
+        self, query: str, top_k: int = 10, user_filters: dict = None,
         use_hyde: bool = False, memory_context: str = ""
     ) -> List[Document]:
         """Retrieve documents using hybrid search (vector + FTS).
 
         Args:
             query: The search query
-            top_k: Number of documents to retrieve
+            top_k: Number of documents to retrieve (default 10, will be graded/reranked)
             user_filters: Metadata filters (country_scope, level)
             use_hyde: If True, generate hypothetical document for better embedding
             memory_context: User context for HyDE generation
@@ -526,6 +528,118 @@ class SimpleRAG:
                 Document(page_content=row[0], metadata=row[1])
                 for row in result
             ]
+        return docs
+
+    # ── Smart Retrieval with Query Routing ────────────────────────────────
+
+    async def aretrieve_smart(
+        self, query: str, top_k: int = 10, user_filters: dict = None,
+        use_hyde: bool = False, memory_context: str = ""
+    ) -> List[Document]:
+        """Smart retrieval that uses query routing to prioritize YAML facts vs narratives.
+
+        For FACT queries: prioritizes YAML fact chunks (is_yaml_fact=true)
+        For NARRATIVE queries: prioritizes markdown narrative chunks
+        For HYBRID queries: balanced retrieval of both
+
+        Args:
+            query: The search query
+            top_k: Number of documents to retrieve
+            user_filters: Metadata filters (country_scope, level)
+            use_hyde: If True, generate hypothetical document for better embedding
+            memory_context: User context for HyDE generation
+
+        Returns:
+            List of Document objects, with fact/narrative mix based on query type
+        """
+        # Classify the query
+        routing_result = classify_query(query)
+        weights = get_search_weights(routing_result)
+
+        logger.info(
+            f"Query routing: '{query[:50]}...' → {routing_result.query_type.value} "
+            f"(confidence={routing_result.confidence:.2f})"
+        )
+
+        search_query = query
+        if use_hyde:
+            search_query = await self.agenerate_hypothetical_doc(query, memory_context)
+
+        embedding = await self.get_embedding(search_query)
+        if not embedding:
+            return []
+
+        where_clause = ""
+        filter_params = {}
+        level_boost_expr = ""
+        level_params = {}
+
+        if user_filters:
+            where_clause, filter_params = self._build_filter_sql(user_filters)
+            level_boost_expr, level_params = self._build_level_boost_expr(user_filters)
+
+        # Build base scoring
+        vector_score = "(embedding <=> CAST(:embedding AS vector))"
+        fts_score = (
+            "COALESCE(1.0 - ts_rank_cd("
+            "to_tsvector('simple', content) || to_tsvector('russian', content), "
+            "plainto_tsquery('simple', :query_text) || plainto_tsquery('russian', :query_text)"
+            "), 1.0)"
+        )
+        hybrid_score = (
+            f"({self.VECTOR_WEIGHT} * {vector_score} + "
+            f"{self.FTS_WEIGHT} * {fts_score})"
+        )
+
+        # Add fact/narrative boost based on query type
+        # is_yaml_fact = true → fact chunk, false/null → narrative chunk
+        facts_weight = weights['facts_weight']
+        narratives_weight = weights['narratives_weight']
+
+        # Boost score: lower is better, so we subtract for the preferred type
+        # If facts_weight > narratives_weight, we want YAML facts to score lower (better)
+        fact_boost = (
+            f"CASE WHEN (metadata->>'is_yaml_fact')::boolean = true "
+            f"THEN -{facts_weight * 0.3} ELSE -{narratives_weight * 0.3} END"
+        )
+
+        final_score = f"({hybrid_score} + {fact_boost})"
+
+        if level_boost_expr:
+            order_by = f"ORDER BY {level_boost_expr} ASC, {final_score}"
+        else:
+            order_by = f"ORDER BY {final_score}"
+
+        sql_str = f"""
+            SELECT content, metadata
+            FROM simple_documents
+            {where_clause}
+            {order_by}
+            LIMIT :top_k
+        """
+
+        all_params = {
+            "embedding": str(embedding),
+            "query_text": query,
+            "top_k": top_k,
+            **filter_params,
+            **level_params,
+        }
+
+        async with self._async_session_factory() as session:
+            result = await session.execute(text(sql_str), all_params)
+            docs = [
+                Document(page_content=row[0], metadata=row[1])
+                for row in result
+            ]
+
+        # Log retrieval stats
+        fact_count = sum(1 for d in docs if d.metadata.get('is_yaml_fact'))
+        narrative_count = len(docs) - fact_count
+        logger.info(
+            f"Retrieved {len(docs)} docs: {fact_count} facts, {narrative_count} narratives"
+        )
+
         return docs
 
     # ── Query Decomposition ───────────────────────────────────────────────
@@ -1027,4 +1141,3 @@ class SimpleRAG:
             question, enhanced_context, chat_history, memory_context, current_date
         ):
             yield chunk
-

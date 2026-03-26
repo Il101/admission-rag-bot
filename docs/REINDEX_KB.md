@@ -12,6 +12,7 @@ You need to re-index the knowledge base when:
 
 The indexing script (`init_scripts/index_knowledge_base.py`) now:
 - 🔄 Automatically detects embedding dimensions from configured provider
+- 🔍 Verifies actual DB vector dimensions from stored vectors (`vector_dims`) to catch silent mismatches
 - 🔄 Recreates database table if dimensions changed
 - 🔄 Supports all providers (Google, NVIDIA, OpenAI)
 - 🔄 Tracks provider and dimensions in `kb_sync_state` table
@@ -28,6 +29,19 @@ railway variables set REINDEX_TRIGGER=$(date +%s)
 
 # Or just redeploy
 railway up --detach
+```
+
+If you need to force a full rebuild even when hash/provider look unchanged:
+
+```bash
+railway variable set FORCE_REINDEX=true
+railway up --detach
+```
+
+After successful re-index, disable it to avoid unnecessary work on every deploy:
+
+```bash
+railway variable delete FORCE_REINDEX
 ```
 
 The init script runs automatically on every deployment via `nixpacks.toml`:

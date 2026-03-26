@@ -1,0 +1,318 @@
+id: wu-wien
+
+name:
+  de: Wirtschaftsuniversität Wien
+  en: Vienna University of Economics and Business
+  ru: Венский экономический университет
+  short: WU
+
+city: Wien
+website: https://www.wu.ac.at
+admission_portal: "wu.ac.at Application Tool"
+students_count: 21800
+founded: 1898
+accreditations: ["AACSB", "EQUIS", "AMBA"]  # Тройная аккредитация!
+ranking: "FT European Business Schools Top 50"
+
+# КРИТИЧНО: С 2026 ВСЕ Bachelor требуют вступительный экзамен!
+key_change_2026: "С 2026 года ВСЕ Bachelor-программы WU Wien требуют вступительный экзамен!"
+
+# Дедлайны вступительных экзаменов
+entrance_exams:
+  bachelor:
+    registration:
+      portal: wu.ac.at
+      start: 2026-03-02
+      end: 2026-05-19
+      notes: "Поздняя регистрация НЕВОЗМОЖНА"
+
+    self_assessment:
+      deadline: 2026-05-28
+      type: online
+      notes: "Не оцениваемый, ориентационный"
+
+    preparation_days:
+      bess_be:
+        dates: "27–29 июня 2026"
+        location: Campus WU
+        cost: free
+      business_law:
+        dates: "26–28 июня 2026"
+        location: Campus WU
+        cost: free
+
+    exams:
+      - name: Business, Economics and Social Sciences (BESS)
+        language: german
+        places: 2703
+        exam_date: 2026-06-30
+        exam_time: "Утро"
+        location: "Vienna Congress & Convention Center"
+
+      - name: Business and Economics (B&E)
+        language: english
+        places: 240
+        exam_date: 2026-06-30
+        exam_time: "После обеда"
+        location: "Vienna Congress & Convention Center"
+        notes: "Открыта ТОЛЬКО для зимнего семестра (один набор в год)"
+
+      - name: Business Law
+        language: german
+        places: 870
+        exam_date: 2026-07-01
+        location: Campus WU
+
+    exam_format:
+      - "Тест с множественным выбором"
+      - "Открытые вопросы"
+      - "Логическое и аналитическое мышление"
+      - "Математика"
+      - "Понимание текста (немецкий/английский)"
+      - "Экономические концепции"
+
+  master:
+    management:
+      new_in_2026: true
+      places: 120
+      registration:
+        start: 2026-01-08
+        end: 2026-03-17
+      written_exam_online: 2026-04-13
+      oral_exam: 2026-06-01
+      notes: "До 2026 было ~430 студентов/год → конкурс резко вырос!"
+
+    english_programs_rolling:
+      portal: wu.ac.at
+      priority_deadlines:
+        - wave: I
+          deadline: 2025-10-08
+          results: "до середины декабря 2025"
+        - wave: II
+          deadline: 2026-01-08
+          results: "до конца марта 2026"
+          notes: "CEMS — финальный дедлайн!"
+        - wave: III
+          deadline: 2026-03-08
+          results: "до середины июня 2026"
+          notes: "КРИТИЧНО: буквально сейчас!"
+
+      programs:
+        - name: International Management / CEMS
+          deadline: "8 января 2026 (ЗАКРЫТ!)"
+        - name: Strategy, Innovation and Management Control
+          deadline: 2026-03-08
+        - name: Supply Chain Management
+          deadline: 2026-03-08
+        - name: Digital Economy
+          deadline: 2026-03-08
+        - name: Quantitative Finance
+          deadline: 2026-03-08
+        - name: Economics
+          deadline: 2026-03-08
+        - name: Marketing
+          deadline: 2026-03-08
+        - name: Socio-Ecological Economics and Policy
+          deadline: 2026-03-08
+        - name: Business Communication
+          deadline: 2026-03-08
+
+      acceptance_period: "10 дней на принятие + оплату admission deposit"
+
+  source_url: https://www.wu.ac.at/en/programs/application-and-admission
+  last_verified: 2026-03-01
+
+# Master немецкие (7 программ)
+programs_master_german:
+  with_exam:
+    - name: Management
+      places: 120
+      new_in_2026: true
+
+  without_exam:
+    - Finanzen und Rechnungswesen (Finance and Accounting)
+    - Steuern und Rechnungslegung
+    - Wirtschaftsrecht (Business Law)
+    - Sozioökonomie (Socioeconomics)
+    - Wirtschaftspädagogik
+    - Export- und Internationalisierungsmanagement
+
+# Требования к языкам
+language_requirements:
+  german:
+    for_bachelor_registration: A2
+    for_bachelor_enrollment: C1
+    for_german_master: C1
+    for_be_bachelor: not_required
+    for_english_master: not_required
+    certificates:
+      c1: ["ÖSD C1", "Goethe C1", "telc C1 Hochschule", "DSH2", "TestDaF TDN5"]
+    a2_validity: 2 years
+    c1_validity: 3 years
+    source_url: https://www.wu.ac.at/en/programs/application-and-admission/language
+    last_verified: 2026-03-01
+
+  english:
+    for_english_master:
+      - name: TOEFL iBT
+        min_score: 100
+        notes: "Включая Home Edition. Выше чем TU Wien (87)!"
+      - name: IELTS Academic
+        min_score: 7.0
+        section_min: 6.0
+      - name: Cambridge C1/C2
+        min_score: "Grade B+ / C+"
+      - name: Oxford Test of English
+        min_score: 150
+        level: Advanced
+
+    for_be_bachelor:
+      - name: TOEFL iBT
+        min_score: 85
+      - name: IELTS Academic
+        min_score: 6.0
+      - name: Cambridge B2 First
+        min_score: "Grade C+"
+      - name: PTE Academic
+        min_score: 70
+      - name: Oxford Test of English
+        min_score: 125
+
+    exemptions:
+      - "Гражданство страны с английским как официальным языком"
+      - "Bachelor degree полностью на английском (3+ лет) — нужна справка со штампом"
+      - "Высший балл по английскому в аттестате EU/EEA/Швейцария (только для B&E Bachelor)"
+    not_exemptions:
+      - "Exchange semester на английском (НЕ считается)"
+
+    notes: "WU имеет БОЛЕЕ ВЫСОКИЕ требования к английскому чем TU Wien!"
+    source_url: https://www.wu.ac.at/en/programs/application-and-admission/language
+    last_verified: 2026-03-01
+
+# Стоимость
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://www.wu.ac.at/en/students/getting-organized/tuition-fees-students-union-oeh-dues
+    last_verified: 2026-03-01
+
+  - category: eu
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+  - category: ukraine
+    amount: 0
+    currency: EUR
+    period: semester
+    years: "2025/26, 2026/27"
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+# Стипендии
+scholarships:
+  - name: Mondi International Scholarships
+    availability: "Может быть неактивна в 2026"
+    for: Master программы
+    coverage: "Полное tuition fee + часть жилья на 2 года"
+    places_per_year: "~7 (минимум 4 для женщин)"
+    criteria: ["Высокий академический результат", "Финансовая нужда", "Международный фон"]
+    source_url: https://www.wu.ac.at/en/students/scholarships
+
+  - name: ISUWU Scholarships
+    for: "Летние программы (не полноценное обучение)"
+    coverage: "Программный взнос + €1000"
+
+  - name: OeAD Scholarships
+    type: государственные
+    notes: "Ernst Mach Grant для стажировок 1-9 мес"
+    website: scholarships.at
+
+# VWU
+vwu:
+  applies: true
+  notes:
+    - "WU Wien участвует в VWU (Vorstudienlehrgang der Wiener Universitäten)"
+    - "Если немецкий ниже B2 → направляют в VWU"
+    - "После EPD всё равно нужно пройти ВСТУПИТЕЛЬНЫЙ ЭКЗАМЕН!"
+    - "VWU не гарантирует зачисление — только даёт C1"
+  source_url: https://vorstudienlehrgang.oead.at/en/vienna
+  last_verified: 2026-03-01
+
+# Подача документов
+submission:
+  method: online_only
+  portal: "Application Tool на wu.ac.at"
+  notes:
+    - "Почтой — только для финального зачисления и легализованных оригиналов"
+    - "Заявления на все программы — ИСКЛЮЧИТЕЛЬНО онлайн"
+
+  documents_english_master:
+    - name: Онлайн-анкета
+      required: true
+    - name: Diploma / Bachelor certificate
+      required: true
+      legalization: apostille
+      translation: required
+    - name: Academic transcripts
+      required: true
+      translation: required
+    - name: Proof of English
+      required: true
+    - name: CV / Lebenslauf
+      required: true
+    - name: Letter of motivation
+      required: true
+      notes: "Обязателен для большинства программ"
+    - name: Копия паспорта
+      required: true
+    - name: Letter of recommendation
+      required: conditional
+      notes: "Проверяй требования конкретной программы"
+
+  source_url: https://www.wu.ac.at/en/programs/application-and-admission/
+  last_verified: 2026-03-01
+
+# Кампус
+campus:
+  name: Campus WU (Vienna Economic Campus)
+  address: "Welthandelsplatz 1, 1020 Wien"
+  metro: "U2 Messe-Prater или Krieau (5 мин пешком)"
+  opened: 2013
+  architects: ["Zaha Hadid", "BUSarchitektur", "CRABstudio", "Atelier Hitoshi Abe", "NO.MAD"]
+  library: "Library & Learning Center by Zaha Hadid"
+
+# События
+events:
+  - name: WU Open Day
+    date: 2026-03-13
+    time: "9:00–15:00"
+    location: "Ceremonial Hall + Audimax"
+
+# Контакты
+contacts:
+  bachelor_admission:
+    address: "Welthandelsplatz 1, 1020 Wien"
+    email: bachelor.admission@wu.ac.at
+    phone: "+43-1-31336-4800"
+
+  master_admission:
+    email: master.admission@wu.ac.at
+
+  international_support:
+    email: international.students@wu.ac.at
+    notes: "Для вопросов по ВНЖ после получения оффера"

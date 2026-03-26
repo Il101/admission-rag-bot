@@ -1,0 +1,321 @@
+id: tu-graz
+
+name:
+  de: Technische Universität Graz
+  en: Graz University of Technology
+  ru: Технический университет Граца
+
+city: Graz
+website: https://www.tugraz.at
+admission_portal: https://online.tugraz.at
+students_count: 13000
+founded: 1811
+
+# КРИТИЧНО: Документы только по ПОЧТЕ!
+submission:
+  method: mail_only
+  address: |
+    Technische Universität Graz
+    Studienabteilung (Registrar's Office)
+    Rechbauerstraße 12
+    A-8010 Graz
+    AUSTRIA
+  notes:
+    - "Принципиальное отличие от Uni Graz — документы по ПОЧТЕ, не онлайн!"
+    - "Заявки по email НЕ рассматриваются"
+    - "Заявки через агентства ОТКЛОНЯЮТСЯ (§60 Universitätsgesetz)"
+    - "TU Graz СОХРАНЯЕТ документы (возврат только по запросу)"
+    - "Pre-registration в TUGRAZonline ПЕРЕД отправкой почтой"
+  pre_registration:
+    portal: https://online.tugraz.at
+    opened: 2025-12-19
+  source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/registration-and-admission/admission-of-international-degree-programme-applicants/
+  last_verified: 2026-03-01
+
+# Дедлайны
+deadlines:
+  - semester: WS2026/27
+    category: non-eu
+    level: [bachelor, master]
+    submission:
+      start: 2026-05-01
+      end: 2026-08-15
+    enrollment:
+      start: 2026-07-06
+      end: 2026-09-05
+    notes: "Дедлайн — дата ПОЛУЧЕНИЯ в TU Graz, не отправки! Из России DHL Express 5-7 дней."
+    source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/registration-and-admission/admission-periods/
+    last_verified: 2026-03-01
+
+  - semester: SS2027
+    category: non-eu
+    level: [bachelor, master]
+    submission:
+      start: 2026-12-01
+      end: 2027-01-15
+    source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/registration-and-admission/admission-periods/
+    last_verified: 2026-03-01
+
+  - semester: WS2026/27
+    category: eu
+    level: [master]
+    submission:
+      start: 2026-05-01
+      end: 2026-10-15
+    source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/registration-and-admission/admission-periods/
+    last_verified: 2026-03-01
+
+# Требования к языкам — особые!
+language_requirements:
+  german:
+    direct_admission: C1
+    submission_minimum: A2
+    notes: "C1 для зачисления. Если нет C1 → направляют в VGUH Graz."
+    certificates:
+      c1:
+        - name: ÖSD C1
+        - name: Goethe-Zertifikat C1
+        - name: TestDaF TDN4
+          notes: "TDN4 в каждом разделе"
+        - name: DSH-2
+        - name: DSH-3
+        - name: telc Deutsch C1 / telc Deutsch C1 Hochschule
+        - name: EPD от VGUH Graz
+        - name: Matura немецкоязычной школы
+    certificate_validity_years: 2
+    source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/registration-and-admission/admission-of-international-degree-programme-applicants/proof-of-german-language-competence
+    last_verified: 2026-03-01
+
+  english:
+    required_for:
+      - CS Bachelor
+      - Software Engineering and Management Bachelor
+      - Information and Computer Engineering Bachelor
+      - Chemical and Process Engineering Bachelor
+      - All English Master programs
+    min_level: C1
+    certificates:
+      - name: IELTS Academic
+        min_score: 7.0
+      - name: TOEFL iBT
+        min_score: 95
+      - name: Cambridge C1 Advanced (CAE)
+        min_score: 180
+      - name: Cambridge C2 Proficiency (CPE)
+        min_score: "Grade C"
+      - name: PTE Academic
+        min_score: 76
+    notes: "4 Bachelor программы требуют НЕМЕЦКИЙ C1 + АНГЛИЙСКИЙ C1!"
+    supplementary_exam: "VDE в VGUH Graz (если нет C1 по английскому)"
+    source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/registration-and-admission/admission-of-international-degree-programme-applicants/proof-of-english-language-competence
+    last_verified: 2026-03-01
+
+# Стоимость
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/financial-matters/tuition-fees-and-the-austrian-student-union-fee
+    last_verified: 2026-03-01
+
+  - category: eu
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+  - category: rwr_card
+    amount: 0
+    currency: EUR
+    period: semester
+    notes: "RWR Card и Family Permit = только ÖH-Beitrag"
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+# Вступительные экзамены
+entrance_exams:
+  bachelor:
+    - name: Architecture
+      type: creative_test_portfolio
+      registration_period: "~март–апрель"
+
+    - name: Molecular Biology (NAWI Graz)
+      type: test
+      registration_period: "~март–апрель"
+
+  master:
+    - name: Computer Science
+      language: english
+      status: "ЗАКРЫТО Winter 2026/27 (регистрация была октябрь-декабрь 2025)"
+
+    - name: Software Engineering and Management
+      language: english
+      status: "ЗАКРЫТО Winter 2026/27"
+
+    - name: Information and Computer Engineering
+      language: english
+      status: "ЗАКРЫТО Winter 2026/27"
+
+    - name: Machine Learning
+      language: english
+      status: "Уточнять"
+
+    - name: Biomedical Engineering
+      language: english
+      status: "Уточнять"
+
+    - name: Advanced Materials Science (NAWI)
+      language: english
+      registration:
+        start: 2025-10-15
+        end: 2025-12-15
+      status: "Закрыто"
+
+  notes: "Для большинства English Master регистрация на Winter 2026/27 УЖЕ ЗАКРЫТА! Следующий приём Summer 2027 или Winter 2027/28."
+  source_url: https://www.tugraz.at/en/studying-and-teaching/degree-and-certificate-programmes/masters-degree-programmes/
+  last_verified: 2026-03-01
+
+# Bachelor программы со специальными требованиями к английскому
+programs_require_english_c1:
+  list:
+    - Informatik (Computer Science)
+    - Software Engineering and Management
+    - Information and Computer Engineering
+    - Chemical and Process Engineering
+  notes: "Эти 4 программы требуют НЕМЕЦКИЙ C1 + АНГЛИЙСКИЙ C1!"
+
+# Master программы на английском
+programs_master_english:
+  computer_science:
+    - Computer Science (MSc)
+    - Software Engineering and Management (MSc)
+    - Information and Computer Engineering (MSc)
+    - Machine Learning (MSc)
+    - Biomedical Engineering (MSc)
+
+  engineering:
+    - Mechanical Engineering (MSc)
+    - Electrical Engineering (MSc)
+    - Sustainable Energy Systems (MSc)
+    - Space Sciences and Earth from Space (MSc)
+
+  nawi_graz:
+    - Advanced Materials Science
+    - Environmental Geosciences
+    - Chemistry
+    - Physics
+
+# NAWI Graz партнёрство
+nawi_graz:
+  description: "Совместная программа TU Graz + Uni Graz (с 2008)"
+  website: https://www.nawigraz.at
+
+  bachelor_programs:
+    - name: Chemie
+      main_university: TU Graz
+    - name: Physik
+      main_university: Uni Graz
+    - name: Mathematik
+      main_university: Uni Graz
+    - name: Erdwissenschaften
+      main_university: Uni Graz
+    - name: Molecular Biology
+      main_university: Uni Graz
+    - name: Environmental Systems Science
+      main_university: Uni Graz
+
+  master_english:
+    - name: Advanced Materials Science
+      main_university: TU Graz
+    - name: Environmental Geosciences
+      main_university: Uni Graz
+    - name: Computational Science
+      main_university: TU Graz
+    - name: Chemistry – Advanced Synthesis and Catalysis
+      main_university: TU Graz
+
+  admission: "Специальная процедура, регистрация 15 октября — 15 декабря ежегодно"
+  source_url: https://www.nawigraz.at/en/teaching/
+  last_verified: 2026-03-01
+
+# Документы для подачи
+required_documents:
+  list:
+    - name: Форма заявления (Application for Admission)
+      notes: "Скачать с tugraz.at, заполнить, распечатать, подписать"
+      required: true
+
+    - name: Паспорт
+      notes: "Простая цветная копия всех страниц (нотариальное заверение НЕ требуется)"
+      required: true
+
+    - name: Аттестат о среднем образовании
+      required: true
+      legalization: apostille
+      translation: sworn_translator
+      languages: [de, en]
+
+    - name: Транскрипт/Zeugnis
+      required: true
+      translation: required
+
+    - name: Языковой сертификат немецкого
+      required: true
+      validity: 2 years
+
+    - name: Языковой сертификат английского C1
+      required: conditional
+      condition: "Для CS/SEM/ICE/CPE Bachelor и всех English Masters"
+
+  source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/registration-and-admission/admission-of-international-degree-programme-applicants/
+  last_verified: 2026-03-01
+
+# Контакты — разделены по типу программ!
+contacts:
+  bachelor:
+    email: admission.bachelor@tugraz.at
+    phone: "+43 316 873 6419"
+
+  master_german:
+    email: admission.master@tugraz.at
+    phone: "+43 316 873 6626"
+
+  master_english:
+    email: master.english@tugraz.at
+    phone: "+43 316 873 6628"
+
+  doctoral:
+    email: admission.phd@tugraz.at
+    phone: "+43 316 873 6629"
+
+  registrar:
+    name: Registrar's Office (Studienabteilung)
+    address: "Rechbauerstraße 12/I, 8010 Graz"
+    email: studienservice@tugraz.at
+    hours: "Пн, Вт, Чт, Пт 9:00–12:00 (только по записи)"
+    appointment: "book.timify.com (поиск 'TU Graz')"
+
+# Кампусы
+campuses:
+  - name: Campus Alte Technik
+    address: "Rechbauerstraße 12"
+    notes: "Главный, Registrar's Office здесь"
+
+  - name: Campus Neue Technik
+    address: "Stremayrgasse"
+    notes: "Химия, физика"
+
+  - name: Campus Inffeldgasse
+    notes: "IT, информатика, биомедицина"

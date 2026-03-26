@@ -1,0 +1,390 @@
+id: uni-graz
+
+name:
+  de: Karl-Franzens-Universität Graz
+  en: University of Graz
+  ru: Университет Граца
+  short: KFU
+
+city: Graz
+website: https://uni-graz.at
+admission_portal: https://online.uni-graz.at
+students_count: 32000
+founded: 1585
+
+# Дедлайны подачи документов
+deadlines:
+  # Bachelor Non-EU
+  - semester: WS2026/27
+    category: non-eu
+    level: [bachelor, diploma]
+    submission:
+      start: 2026-06-15
+      end: 2026-07-13
+    enrollment:
+      end: 2026-09-22
+    notes: "Категория по аттестату, не по гражданству! Аттестат из России = Non-EU."
+    source_url: https://www.uni-graz.at/en/studies/admission-and-deadlines/
+    last_verified: 2026-03-01
+
+  - semester: SS2027
+    category: non-eu
+    level: [bachelor, diploma]
+    submission:
+      start: 2026-11-19
+      end: 2026-12-18
+    source_url: https://www.uni-graz.at/en/studies/admission-and-deadlines/
+    last_verified: 2026-03-01
+
+  # Bachelor EU
+  - semester: WS2026/27
+    category: eu
+    level: [bachelor, diploma]
+    submission:
+      start: 2026-06-15
+      end: 2026-08-24
+    source_url: https://www.uni-graz.at/en/studies/admission-and-deadlines/
+    last_verified: 2026-03-01
+
+  # Master Non-EU (РАНЬШЕ чем Bachelor!)
+  - semester: WS2026/27
+    category: non-eu
+    level: [master]
+    submission:
+      start: 2026-05-11
+      end: 2026-06-08
+    enrollment:
+      end: 2026-09-22
+    notes: "Master для Non-EU — 8 июня (раньше чем Bachelor 13 июля!)"
+    source_url: https://www.uni-graz.at/en/studies/admission-and-deadlines/
+    last_verified: 2026-03-01
+
+  # Master EU
+  - semester: WS2026/27
+    category: eu
+    level: [master]
+    submission:
+      start: 2026-07-06
+      end: 2026-08-31
+    source_url: https://www.uni-graz.at/en/studies/admission-and-deadlines/
+    last_verified: 2026-03-01
+
+# Требования к немецкому языку
+language_requirements:
+  german:
+    direct_admission: C1
+    submission_minimum: A2
+    notes: "С 2026 года Uni Graz тоже требует C1 (раньше было B2)"
+    certificates:
+      c1:
+        - name: ÖSD Zertifikat C1
+        - name: Goethe-Zertifikat C1
+        - name: TestDaF TDN5
+          notes: "TDN5 в каждом разделе (или сумма соответствующая C1)"
+        - name: telc Deutsch C1
+        - name: DSD II
+        - name: EPD от VGUH Graz
+        - name: Matura с немецким как языком обучения
+    certificate_validity_years: 2
+    source_url: https://internationale-studierende.uni-graz.at/en/language-certificates/
+    last_verified: 2026-03-01
+
+  english:
+    required_for: master-english-programs
+    min_level: B2-C1
+    certificates:
+      - name: Cambridge CAE (C1 Advanced)
+        min_score: 180
+      - name: Cambridge CPE (C2 Proficiency)
+        min_score: "Grade C"
+      - name: Pearson PTE Academic
+        min_score: 76
+      - name: TOEFL iBT
+        min_score: 95
+        notes: "для некоторых программ 100+"
+      - name: IELTS Academic
+        min_score: 7.0
+    source_url: https://internationale-studierende.uni-graz.at/en/language-certificates/
+    last_verified: 2026-03-01
+
+# Стоимость обучения
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://www.uni-graz.at/en/studies/
+    last_verified: 2026-03-01
+
+  - category: eu
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+  - category: ukraine
+    amount: 0
+    currency: EUR
+    period: semester
+    notes: "Защитный статус"
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+# Вступительные экзамены
+entrance_exams:
+  registration:
+    portal: https://aufnahmeverfahren.uni-graz.at
+    period:
+      start: 2026-03-02
+      end: 2026-05-04T18:00:00
+    notes: "Дедлайн 4 мая 18:00 — точно, без исключений"
+
+  bachelor:
+    - name: Psychology (Psychologie)
+      places: 230
+      exam_period: 2026-07
+      competition_2024: "679 участников на 230 мест (≈3:1)"
+      format:
+        - part: A
+          weight: 50
+          content: "Способность усваивать знания из введения в психологию (скрипт)"
+        - part: B
+          weight: 25
+          content: "Понимание научных текстов и логических выводов"
+        - part: C
+          weight: 25
+          content: "Когнитивные способности"
+      source_url: https://aufnahmeverfahren.uni-graz.at
+      last_verified: 2026-03-01
+
+    - name: Biology (Biologie)
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Molecular Biology
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Pharmaceutical Sciences
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Law (Rechtswissenschaften, Diplom)
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+  master:
+    - name: Psychology
+      exam_period: 2026-07
+      notes: "Только если бакалавриат был НЕ в Uni Graz"
+      last_verified: 2026-03-01
+
+    - name: Pharmacy (Pharmazie)
+      exam_period: 2026-07
+      last_verified: 2026-03-01
+
+    - name: Psychotherapy
+      registration: 2026-03
+      portal: Med Uni Graz
+      last_verified: 2026-03-01
+
+    - name: NAWI Graz (англ. магистерские)
+      registration:
+        start: 2025-10-15
+        end: 2025-12-15
+      notes: "Только для выпускников других вузов"
+      last_verified: 2026-03-01
+
+    - name: Data Science
+      registration:
+        start: 2025-12-15
+        end: 2026-03-15
+      selection: document_based
+      last_verified: 2026-03-01
+
+  special_procedures:
+    - name: Teacher Training
+      registration:
+        start: 2026-03-02
+        end: 2026-05-13T12:00:00
+      exam_period: 2026-06-22 to 2026-06-26
+      portal: https://zulassunglehramt.at
+      last_verified: 2026-03-01
+
+    - name: Sport Science
+      requirement: "Аттестат спортивной гимназии (sehr gut/gut) ИЛИ Ergänzungsprüfung в сентябре"
+      deadline: 2026-07-15
+      last_verified: 2026-03-01
+
+# VGUH — подготовительная программа Граца
+vguh:
+  name: VGUH (Vorstudienlehrgang der Grazer Universitäten)
+  applies: true
+  address: "Neubaugasse 10, 8020 Graz"
+  website: https://vguh.uni-graz.at
+  oead_page: https://vorstudienlehrgang.oead.at/en/graz
+
+  partners: ["Uni Graz", "TU Graz", "Med Uni Graz", "FH Joanneum"]
+
+  costs:
+    standard:
+      amount: 529
+      currency: EUR
+      period: semester
+      hours: "до 24 уроков/нед."
+    intensive:
+      amount: 829
+      currency: EUR
+      period: semester
+      hours: "более 24 уроков/нед."
+    notes: "Цена VGUH Graz ЗНАЧИТЕЛЬНО ниже VWU Wien (~€1800)!"
+
+  structure:
+    - modules: "1-3 семестра"
+    - placement_test: "onSET в начале"
+    - final_exam: "EPD = C1"
+
+  course_registration: "Выбор курсов на летний семестр начинается 11 февраля 2026"
+
+  trap: "Если зачислен в VGUH — ВНЖ студента выдаётся. Нельзя бросить VGUH и сдать Goethe вместо EPD."
+  source_url: https://vorstudienlehrgang.oead.at/en/graz
+  last_verified: 2026-03-01
+
+# NAWI Graz партнёрство
+nawi_graz:
+  description: "Совместные программы Uni Graz + TU Graz по точным и естественным наукам"
+  website: https://nawigraz.at
+
+  bachelor:
+    - Chemie / Chemistry
+    - Physik / Physics
+    - Mathematik
+    - Erdwissenschaften (Geosciences)
+    - Molekulare Biologie (Molecular Biology)
+
+  master_english:
+    - Chemistry
+    - Physics
+    - Advanced Materials Science
+    - Computational Science
+
+  notes: "Студент зачислен в один вуз, но проходит курсы в обоих. Диплом от одного вуза с пометкой NAWI Graz."
+  source_url: https://nawigraz.at
+  last_verified: 2026-03-01
+
+# Программы на английском
+programs_english:
+  bachelor:
+    - notes: "Большинство Bachelor — только немецкий. Исключение: некоторые NAWI Graz программы имеют английские элементы."
+
+  master:
+    humanities:
+      - European Joint Master in English and American Studies
+      - International Studies in Culture and Religion
+      - European Masters in Language and Speech
+    social:
+      - Global Studies
+      - Social and Public Communication
+      - Science, Technology and Society
+    sciences:
+      - Advanced Materials Science
+      - Molecular Biology
+      - Environmental Geosciences
+      - Chemistry
+      - Physics
+    other:
+      - Peace, Development, Security and International Conflict Transformation
+      - Counselling in Somatic and Mental Health
+      - Computational Social Systems
+
+# Подача документов
+submission:
+  method: online_only
+  portal: https://online.uni-graz.at
+  enrollment: in_person
+  notes:
+    - "При подаче — сканы оригиналов"
+    - "Оригиналы предъявляются при личном зачислении"
+    - "После ввода данных — скачать 'Application for enrollment', подписать, отправить на studienabteilung@uni-graz.at"
+
+  documents:
+    - name: Паспорт или ID
+      format: JPG или PDF
+      required: true
+    - name: Аттестат о среднем образовании
+      format: PDF
+      required: true
+      legalization: apostille
+      translation: sworn_translator
+      languages: [de, en]
+    - name: Транскрипт
+      format: PDF
+      required: true
+    - name: Сертификат немецкого языка
+      levels: [A2, C1]
+      format: PDF
+      required: true
+    - name: APS-сертификат
+      required: conditional
+      condition: "Обязательно для студентов из Китая!"
+
+  country_specific:
+    russia:
+      national_exam: not_required
+      notes: "Россия НЕ указана в списке стран с обязательным национальным экзаменом"
+    china:
+      aps_certificate: required
+    iran:
+      national_exam: "Konkur или Pre-University Course"
+    kazakhstan:
+      national_exam: required
+
+  source_url: https://internationale-studierende.uni-graz.at/en/application-bachelor-diploma-studies/
+  last_verified: 2026-03-01
+
+# Контакты
+contacts:
+  admission:
+    name: Academic Affairs / International Admissions
+    email: zulassung.international@uni-graz.at
+    phone: "+43 316 380-1170"
+    address: "Universitätsplatz 3a, 8010 Graz"
+    hours_in_person: "вт 8:00–11:30 и 12:30–15:30; чт 8:30–13:00 (по записи)"
+    hours_phone: "пн, ср 8:00–14:00; пт 8:00–12:00"
+
+  students:
+    name: 4Students (Information Centre)
+    website: https://lehr-studienservices.uni-graz.at/en/about-us/4students/
+
+  entrance_exams:
+    website: https://aufnahmeverfahren.uni-graz.at
+
+  vguh:
+    address: "Neubaugasse 10, 8020 Graz"
+    website: https://vguh.uni-graz.at
+
+# Город
+city_info:
+  population: 300000
+  rank: "Второй по размеру город Австрии"
+  cost_comparison: "На 10-20% дешевле Вены"
+  housing:
+    wg_room: "€400–650/мес"
+    dormitory: "€300–500/мес"
+    booking_advance: "минимум за 3 месяца"
+  transport:
+    semesterticket: "~€115/семестр"
+  nearby:
+    - "Словения (40 мин)"
+    - "Италия/Trieste (1.5ч)"

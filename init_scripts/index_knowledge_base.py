@@ -17,6 +17,9 @@ from crag.llm_providers import get_llm
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import YAML facts indexer
+from crag.yaml_facts_indexer import index_all_yaml_facts
+
 
 # ── YAML Frontmatter Parsing ──────────────────────────────────────────────
 
@@ -193,8 +196,8 @@ def split_markdown(body: str, file_metadata: dict, max_chunk_len: int = 800) -> 
             content = f"{prefix}\n{section_text}" if prefix else section_text
             chunks.append({"content": content, "metadata": chunk_meta})
         else:
-            # Split large sections by paragraphs with overlap
-            sub_chunks = _split_long_section(section_text, max_chunk_len, overlap=50)
+            # Split large sections by paragraphs with overlap (increased from 50 to 200)
+            sub_chunks = _split_long_section(section_text, max_chunk_len, overlap=200)
             for i, sub in enumerate(sub_chunks):
                 sub_path = f"{section_path} (часть {i+1})" if section_path else f"часть {i+1}"
                 sub_meta = dict(chunk_meta)
@@ -205,43 +208,111 @@ def split_markdown(body: str, file_metadata: dict, max_chunk_len: int = 800) -> 
     return chunks
 
 
-def _split_long_section(text: str, max_length: int = 800, overlap: int = 50) -> list[str]:
-    """Split a long text section by paragraphs, with character overlap."""
-    paragraphs = text.split("\n\n")
+def _split_long_section(text: str, max_length: int = 800, overlap: int = 200) -> list[str]:
+    """Split a long text section by paragraphs and tables, with character overlap.
+
+    Tables (sequences of lines starting with |) are kept intact and not split.
+    """
+    # First, split text into blocks (paragraphs or tables)
+    blocks = []
+    lines = text.split("\n")
+    current_block = []
+    in_table = False
+
+    for line in lines:
+        is_table_line = line.strip().startswith("|")
+
+        if is_table_line:
+            if not in_table:
+                # Start of a table - save previous block
+                if current_block:
+                    blocks.append(("paragraph", "\n".join(current_block)))
+                    current_block = []
+                in_table = True
+            current_block.append(line)
+        else:
+            if in_table:
+                # End of table - save table block
+                if current_block:
+                    blocks.append(("table", "\n".join(current_block)))
+                    current_block = []
+                in_table = False
+
+            # Regular paragraph line
+            if line.strip() == "":
+                # Empty line marks paragraph boundary
+                if current_block:
+                    blocks.append(("paragraph", "\n".join(current_block)))
+                    current_block = []
+            else:
+                current_block.append(line)
+
+    # Don't forget the last block
+    if current_block:
+        block_type = "table" if in_table else "paragraph"
+        blocks.append((block_type, "\n".join(current_block)))
+
+    # Now assemble chunks from blocks, keeping tables intact
     chunks = []
     current_chunk = ""
-    
-    for p in paragraphs:
-        if len(current_chunk) + len(p) + 2 > max_length and current_chunk:
-            chunks.append(current_chunk.strip())
-            # Overlap: keep last N characters as start of next chunk
-            if overlap > 0 and len(current_chunk) > overlap:
-                current_chunk = current_chunk[-overlap:] + "\n\n" + p
+
+    for block_type, block_text in blocks:
+        block_len = len(block_text)
+
+        # If this is a table, never split it
+        if block_type == "table":
+            # If adding this table exceeds max_length, start a new chunk
+            if current_chunk and len(current_chunk) + block_len + 2 > max_length:
+                chunks.append(current_chunk.strip())
+                # Keep overlap from previous chunk
+                if overlap > 0 and len(current_chunk) > overlap:
+                    current_chunk = current_chunk[-overlap:] + "\n\n" + block_text
+                else:
+                    current_chunk = block_text
             else:
-                current_chunk = p
+                current_chunk += "\n\n" + block_text if current_chunk else block_text
         else:
-            current_chunk += "\n\n" + p if current_chunk else p
-    
+            # Regular paragraph - can split if needed
+            if len(current_chunk) + block_len + 2 > max_length and current_chunk:
+                chunks.append(current_chunk.strip())
+                # Keep overlap
+                if overlap > 0 and len(current_chunk) > overlap:
+                    current_chunk = current_chunk[-overlap:] + "\n\n" + block_text
+                else:
+                    current_chunk = block_text
+            else:
+                current_chunk += "\n\n" + block_text if current_chunk else block_text
+
     if current_chunk.strip():
         chunks.append(current_chunk.strip())
-    
-    # Further break down giant paragraphs
+
+    # Further break down giant paragraphs (but not tables!)
     final_chunks = []
     for c in chunks:
-        if len(c) > max_length * 2:
+        # Skip sentence-level splitting if chunk contains a table
+        if "|" in c and len(c) > max_length * 2:
+            # This is a large chunk with a table - keep it as is
+            # (tables are more important than chunk size limit)
+            final_chunks.append(c)
+        elif len(c) > max_length * 2:
+            # Giant paragraph without tables - split by sentences
             sentences = c.replace('. ', '.\n').split('\n')
             temp = ""
             for s in sentences:
                 if len(temp) + len(s) > max_length and temp:
                     final_chunks.append(temp.strip())
-                    temp = s
+                    # Add overlap
+                    if overlap > 0:
+                        temp = temp[-overlap:] + " " + s
+                    else:
+                        temp = s
                 else:
                     temp += " " + s if temp else s
             if temp:
                 final_chunks.append(temp.strip())
         else:
             final_chunks.append(c)
-    
+
     return final_chunks
 
 
@@ -249,6 +320,9 @@ def _split_long_section(text: str, max_length: int = 800, overlap: int = 50) -> 
 
 async def index():
     logger.info("Initializing indexing with multi-provider support...")
+    force_reindex = os.getenv("FORCE_REINDEX", "").strip().lower() in {"1", "true", "yes", "on"}
+    if force_reindex:
+        logger.info("⚠️ FORCE_REINDEX is enabled — full KB re-index will run.")
 
     # Initialize LLM provider to get embedding dimensions
     logger.info("Detecting embedding provider configuration...")
@@ -259,7 +333,7 @@ async def index():
     embedding_dim = len(test_embedding[0])
     logger.info(f"✅ Embedding provider: {llm_provider.config.embedding_provider}, dimensions: {embedding_dim}")
 
-    # Check knowledge base state
+    # Check knowledge base state (markdown files)
     logger.info("Checking knowledge base state...")
     kb_dir = "knowledge_base"
     md_files = []
@@ -269,8 +343,22 @@ async def index():
                 md_files.append(os.path.join(root, file))
     md_files.sort()
 
+    # Also check YAML facts files
+    facts_dir = "facts"
+    yaml_files = []
+    if os.path.exists(facts_dir):
+        for root, dirs, files in os.walk(facts_dir):
+            for file in files:
+                if file.endswith('.yaml'):
+                    yaml_files.append(os.path.join(root, file))
+    yaml_files.sort()
+
+    # Compute combined hash from both markdown and YAML files
     hashes = []
     for path in md_files:
+        with open(path, 'rb') as f:
+            hashes.append(hashlib.md5(f.read()).hexdigest())
+    for path in yaml_files:
         with open(path, 'rb') as f:
             hashes.append(hashlib.md5(f.read()).hexdigest())
     current_hash = hashlib.md5("".join(hashes).encode()).hexdigest()
@@ -363,35 +451,75 @@ async def index():
             "ON simple_documents USING GIN ((to_tsvector('simple', content) || to_tsvector('russian', content)))"
         ))
 
-        # Check if table has data. Even if hash matches, table might be empty
+        # Check if table has data. Even if hash matches, table might be empty.
+        # NOTE: information_schema.data_type is often just "USER-DEFINED" for pgvector,
+        # so we detect real dimensions from stored vectors (vector_dims) first.
         try:
             count = conn.execute(text("SELECT count(*) FROM simple_documents")).scalar()
-            # Check the actual embedding column vector dimension
-            col_info = conn.execute(text("""
-                SELECT data_type FROM information_schema.columns
-                WHERE table_name='simple_documents' AND column_name='embedding'
-            """)).scalar()
+            actual_dim = None
+            distinct_dims = []
 
-            # Parse vector dimension from data_type like "vector(3072)"
-            if col_info and 'vector(' in col_info:
-                actual_dim = int(col_info.split('(')[1].split(')')[0])
-                if actual_dim != embedding_dim and count > 0:
-                    logger.info(f"⚠️ Dimension mismatch: DB has {actual_dim}-dim vectors, provider has {embedding_dim}-dim")
-                    logger.info("🔄 Forcing re-index to update embeddings...")
+            if count > 0:
+                dims_rows = conn.execute(text("""
+                    SELECT DISTINCT vector_dims(embedding)
+                    FROM simple_documents
+                    WHERE embedding IS NOT NULL
+                    ORDER BY 1
+                """)).fetchall()
+                distinct_dims = [row[0] for row in dims_rows if row and row[0] is not None]
+                if distinct_dims:
+                    actual_dim = distinct_dims[0]
+
+                if len(distinct_dims) > 1:
+                    logger.info(f"⚠️ Mixed embedding dimensions found in DB rows: {distinct_dims}")
+                    logger.info("🔄 Forcing full re-index to normalize vector dimensions...")
                     dimension_changed = True
+
+            # Fallback: inspect pg catalog type rendering when table is empty
+            if actual_dim is None:
+                embedding_type = conn.execute(text("""
+                    SELECT format_type(a.atttypid, a.atttypmod)
+                    FROM pg_attribute a
+                    JOIN pg_class c ON c.oid = a.attrelid
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = 'simple_documents'
+                      AND a.attname = 'embedding'
+                      AND n.nspname = current_schema()
+                      AND a.attnum > 0
+                      AND NOT a.attisdropped
+                """)).scalar()
+                if embedding_type and embedding_type.startswith("vector("):
+                    actual_dim = int(embedding_type.split("(")[1].split(")")[0])
+
+            if (
+                actual_dim is not None
+                and actual_dim != embedding_dim
+                and count > 0
+            ):
+                logger.info(
+                    f"⚠️ Dimension mismatch: DB has {actual_dim}-dim vectors, provider has {embedding_dim}-dim"
+                )
+                logger.info("🔄 Forcing re-index to update embeddings...")
+                dimension_changed = True
         except Exception as e:
-            logger.info(f"Could not check column info: {e}")
+            logger.info(f"Could not check embedding dimension: {e}")
             count = 0
 
     # NOTE: pgvector HNSW/IVFFlat indexes are limited to 2000 dims, and
     # Railway's pgvector doesn't support halfvec.  For a small knowledge base
     # the exact sequential scan is fast enough (~0.4 s including network).
 
-    if old_hash == current_hash and count > 0 and not provider_changed and not dimension_changed:
+    if (
+        old_hash == current_hash
+        and count > 0
+        and not provider_changed
+        and not dimension_changed
+        and not force_reindex
+    ):
         logger.info("✅ Knowledge base is unchanged since last deployment. Skipping indexing to save API limits.")
         return
 
-    logger.info("🔄 Knowledge base has changed or provider changed. Clearing existing indexes and re-indexing...")
+    logger.info("🔄 Re-index conditions met. Clearing existing indexes and re-indexing...")
     with engine.begin() as conn:
         # We drop the old langchain payload and our new simple tables
         conn.execute(text("DROP TABLE IF EXISTS langchain_pg_embedding CASCADE"))
@@ -429,6 +557,14 @@ async def index():
                 all_chunks.append(chunk)
         
         logger.info(f"  📄 {source}: {len(chunks)} chunks (frontmatter: {bool(frontmatter)})")
+
+    logger.info(f"Loaded {len(all_chunks)} markdown chunks.")
+
+    # Load YAML facts
+    logger.info("Loading YAML facts from facts/...")
+    yaml_fact_chunks = index_all_yaml_facts("facts")
+    all_chunks.extend(yaml_fact_chunks)
+    logger.info(f"Added {len(yaml_fact_chunks)} YAML fact chunks.")
 
     if not all_chunks:
         logger.warning("No documents found in knowledge_base/!")

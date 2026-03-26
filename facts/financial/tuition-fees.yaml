@@ -1,0 +1,344 @@
+# Tuition Fees in Austria
+# SSOT: Fee structure, exemptions, payment deadlines
+# Last verified: 2026-03-01
+
+id: tuition-fees
+
+# Base fee structure
+base_structure:
+  studienbeitrag:
+    name: "Studienbeitrag (tuition fee)"
+    amount: 726.72
+    currency: EUR
+    period: semester
+    applies_to: "Non-EU students"
+
+  oeh_beitrag:
+    name: "ÖH-Beitrag (student union fee)"
+    amount: 25.20
+    currency: EUR
+    period: semester
+    applies_to: "ALL students without exception"
+    includes: "Student organization fee + accident insurance"
+
+# Complete tariff table
+tariffs:
+  austrian_citizens:
+    studienbeitrag: 0
+    oeh_beitrag: 25.20
+    total: 25.20
+    currency: EUR
+
+  eu_eea_switzerland:
+    studienbeitrag: 0
+    oeh_beitrag: 25.20
+    total: 25.20
+    currency: EUR
+    notes: "Within Regelstudiendauer + 2 semesters"
+
+  non_eu_student_visa:
+    visa_type: "Aufenthaltsbewilligung – Student (§64 NAG)"
+    studienbeitrag: 726.72
+    oeh_beitrag: 25.20
+    total: 751.92
+    currency: EUR
+    notes: "Full Non-EU tariff"
+
+  non_eu_other_residence_permits:
+    types:
+      - "Rot-Weiß-Rot Karte (RWR)"
+      - "RWR Card Plus"
+      - "Niederlassungsbewilligung"
+      - "Daueraufenthalt-EU (permanent residence)"
+      - "Aufenthaltsbewilligung – Familiengemeinschaft"
+    studienbeitrag: 0
+    oeh_beitrag: 25.20
+    total: 25.20
+    currency: EUR
+    notes: "Same as EU tariff"
+
+  dac_ldc_countries:
+    description: "Least Developed Countries (OECD DAC list)"
+    studienbeitrag: 0
+    oeh_beitrag: 25.20
+    total: 25.20
+    currency: EUR
+    examples:
+      - Afghanistan
+      - Angola
+      - Bangladesh
+      - Benin
+      - Bhutan
+      - Burkina Faso
+      - Burundi
+      - Cambodia
+      - CAR
+      - Chad
+      - Comoros
+      - DRC
+      - Djibouti
+      - Eritrea
+      - Ethiopia
+      - Gambia
+      - Guinea
+      - Guinea-Bissau
+      - Haiti
+      - Yemen
+      - Kiribati
+      - Lesotho
+      - Liberia
+      - Madagascar
+      - Malawi
+      - Mali
+      - Mauritania
+      - Mozambique
+      - Myanmar
+      - Nepal
+      - Niger
+      - Rwanda
+      - Sao Tome and Principe
+      - Senegal
+      - Sierra Leone
+      - Solomon Islands
+      - Somalia
+      - South Sudan
+      - Sudan
+      - Tanzania
+      - East Timor
+      - Togo
+      - Tuvalu
+      - Uganda
+      - Vanuatu
+      - Zambia
+    russia_included: false
+
+  ukraine_citizens:
+    studienbeitrag: 0
+    oeh_beitrag: 25.20
+    total: 25.20
+    currency: EUR
+    notes: "Automatic exemption, no separate application needed"
+
+  erasmus_exchange:
+    studienbeitrag: 0
+    oeh_beitrag: 25.20
+    total: 25.20
+    currency: EUR
+
+  oead_scholarship_holders:
+    studienbeitrag: 0
+    oeh_beitrag: 25.20
+    total: 25.20
+    currency: EUR
+
+  eu_overtime:
+    condition: "After Regelstudiendauer + 2 semesters"
+    studienbeitrag: 363.36
+    oeh_beitrag: 25.20
+    total: 388.56
+    currency: EUR
+
+  ausserordentliche_studierende:
+    description: "Non-degree students"
+    studienbeitrag: 363.36
+    oeh_beitrag: 25.20
+    total: 388.56
+    currency: EUR
+
+  vwu_participants:
+    description: "Vorstudienlehrgang participants"
+    oeh_beitrag: 25.20
+    vwu_wien: "~€1,800/semester"
+    vguh_graz: "~€529/semester"
+    notes: "See vorstudienlehrgang.yaml for details"
+
+# Russian citizens
+russia:
+  tariff: "Full Non-EU"
+  total_per_semester: 751.92
+  total_per_year: 1503.84
+  currency: EUR
+  notes: "Same tariff regardless of program language (German or English)"
+
+# Exemptions for Non-EU (no Studienbeitrag)
+exemptions:
+  dac_ldc_countries:
+    condition: "Citizenship of Least Developed Country (OECD DAC list)"
+    russia_eligible: false
+
+  non_student_residence_permit:
+    description: "Non-EU with non-student residence permit = EU tariff"
+    eligible_permits:
+      rwr_card:
+        name: "Rot-Weiß-Rot Karte"
+        result: "Only ÖH-Beitrag €25.20"
+      rwr_card_plus:
+        name: "RWR Card Plus"
+        result: "Only ÖH-Beitrag €25.20"
+      niederlassungsbewilligung:
+        name: "Niederlassungsbewilligung"
+        result: "Only ÖH-Beitrag €25.20"
+      daueraufenthalt_eu:
+        name: "Daueraufenthalt-EU (permanent residence)"
+        result: "Only ÖH-Beitrag €25.20"
+      familiengemeinschaft:
+        name: "Aufenthaltsbewilligung – Familiengemeinschaft"
+        condition: "Spouse/child of Austrian or EU citizen"
+        result: "Only ÖH-Beitrag €25.20"
+    practical_note: |
+      If you first get RWR Card (e.g. as Fachkraft), then enroll in university → pay only €25.20.
+      If you enroll from scratch with student visa → €726.72.
+
+  oesterreich_nahe:
+    name: "Österreich-nahe (connection to Austria)"
+    available_at: ["FH OÖ", "FH Kufstein", "some FH"]
+    reduction: "€726.72 → €363.36"
+    conditions:
+      - "Parents worked/work in Austria"
+      - "Born in Austria"
+      - "Long-term residency in Austria"
+    how_to_apply: "Written application to the specific institution"
+
+  university_employment:
+    description: "University employment waiver"
+    conditions:
+      - "Employed by university (usually 20+ hours/week)"
+      - "Official student union (ÖH) representative"
+    waiver_deadlines:
+      winter_semester: "October 31"
+      summer_semester: "March 31"
+
+# Regelstudiendauer and Toleranzsemester
+regelstudiendauer:
+  eu_eea_ch:
+    within_regelstudien_plus_2: "Free (only ÖH-Beitrag)"
+    after_plus_2: "€363.36/semester"
+  non_eu_student_visa:
+    all_semesters: "€726.72/semester"
+    notes: "No free period - same fee from first to last semester"
+
+# Payment deadlines
+payment_deadlines:
+  winter_semester:
+    period: "October-January"
+    payment_due: "Beginning of September (usually September 1-30)"
+  summer_semester:
+    period: "March-June"
+    payment_due: "Beginning of February (usually February 1-28)"
+  notes:
+    - "Payment by deadline = condition for semester enrollment (Inskription)"
+    - "If not paid → u:space / KUSSS won't allow course registration"
+
+# Fees by institution type
+by_institution_type:
+  state_universities:
+    fee: 726.72
+    currency: EUR
+    period: semester
+    applies_to_non_eu: true
+    institutions:
+      - "Uni Wien"
+      - "TU Wien"
+      - "WU Wien"
+      - "MedUni Wien"
+      - "Uni Graz"
+      - "TU Graz"
+      - "Uni Innsbruck"
+      - "JKU Linz"
+      - "Uni Salzburg"
+      - "BOKU Wien"
+    notes: "Law establishes uniform amount for all state Universitäten"
+
+  fachhochschulen:
+    description: "FH can set fees independently, most follow standard"
+    standard_fee: 726.72
+    exceptions:
+      fh_joanneum:
+        fee: 726.72
+        period: year
+        notes: "Per YEAR, not semester! Half the cost of most FH"
+    institutions:
+      fh_ooe:
+        website: fh-ooe.at
+        fee_per_semester: 726.72
+      fh_joanneum:
+        website: fh-joanneum.at
+        fee_per_year: 726.72
+        notes: "Lowest official fee among FH"
+      fh_kufstein:
+        fee_per_semester: 726.72
+        notes: "Deposit required at application"
+      technikum_wien:
+        website: technikum-wien.at
+        fee_per_semester: 726.72
+      fh_st_poelten:
+        website: fhstp.ac.at
+        fee_per_semester: 726.72
+      fh_campus_wien:
+        website: fh-campuswien.ac.at
+        fee_per_semester: 726.72
+
+  private_universities:
+    description: "Set prices completely independently"
+    examples:
+      modul_university_vienna:
+        bachelor_per_year: 16000
+        master_per_year: 12000
+        mba_per_year: 21000
+        currency: EUR
+      ceu_vienna:
+        per_year: "€12,000-15,000"
+      webster_vienna:
+        per_year: "€15,000-18,000"
+      imc_fh_krems:
+        notes: "Varies"
+      sigmund_freud_privatuniversitaet:
+        per_year: "€8,000-12,000"
+    notes: "Scholarships often available - check when applying"
+
+  ista:
+    name: "Institute of Science and Technology Austria"
+    phd_tuition: 0
+    notes: "Free for all PhD students"
+
+# Annual cost summary (Non-EU, public university)
+annual_costs_non_eu:
+  studienbeitrag_2_semesters: 1453.44
+  oeh_beitrag_2_semesters: 50.40
+  total_university_fees: 1503.84
+  currency: EUR
+
+  indirect_costs:
+    textbooks_scripts: "€200-400"
+    exam_materials: "€50-100"
+    printer_stationery: "€50-100"
+    computer_software: "€0-500 (MS Office often free through university)"
+
+  total_university_plus_study: "~€1,800-2,100/year"
+  notes: "Excluding living expenses"
+
+# Reimbursement (Rückerstattung)
+reimbursement:
+  possible_for:
+    - "Severe illness (more than 2 months in semester) - medical certificate required"
+    - "Pregnancy / childcare (child under 7)"
+    - "Care for seriously ill relative"
+
+  critical_warning:
+    severity: critical
+    description: |
+      Non-EU students with student residence permit (Aufenthaltsbewilligung Studierender §64 NAG)
+      are LEGALLY EXCLUDED from exemption or reimbursement for the above reasons
+      (illness, pregnancy, childcare) at state universities.
+      These benefits apply to EU/EEA citizens and holders of residence permits
+      with equal labor market access.
+
+  application_deadlines:
+    for_winter_semester: "September 30"
+    for_summer_semester: "February 28"
+
+source_urls:
+  - https://studieren.univie.ac.at/en/tuition-fee
+  - https://www.bmbwf.gv.at/en/Topics/Higher-education---Universities/Studying/Tuition-fees.html
+  - https://www.tuwien.at/en/studies/admission/students-union-fee-and-tuition-fee/tuition-fee
+last_verified: 2026-03-01

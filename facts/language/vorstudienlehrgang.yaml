@@ -1,0 +1,153 @@
+# Vorstudienlehrgang - Preparatory Courses for Austrian Universities
+# SSOT: VWU, VGUH, VSS details, costs, process
+# Last verified: 2026-03-01
+
+id: vorstudienlehrgang
+
+# Overview
+description: |
+  Vorstudienlehrgang - preparatory courses at Austrian universities for international students
+  who haven't proven the required German level for direct enrollment. Organized by OeAD.
+
+official_portal: vorstudienlehrgang.oead.at
+
+# CRITICAL: Different names by city!
+naming_warning: |
+  In VIENNA: VWU (Vorstudienlehrgang der Wiener Universitäten)
+  In GRAZ: VGUH (Vorstudienlehrgang der Grazer Universitäten)
+  In LINZ: VSS (Vorstudienlehrgang)
+  These are DIFFERENT organizations! Don't confuse them.
+
+# VWU Path Schema
+vwu_path:
+  - step: 1
+    action: "Get A2 certificate (or higher)"
+  - step: 2
+    action: "Submit Zulassung application to chosen university"
+    result: "Receive Zulassungsbescheid with 'VWU erforderlich' or 'Ergänzungsprüfung Deutsch' note"
+  - step: 3
+    action: "Enroll in VWU (Vorstudienlehrgang)"
+    course_hours: "320 UE (Unterrichtseinheiten à 45 min) - one semester"
+    level: "Intensive German B2 → C1"
+  - step: 4
+    action: "Take Ergänzungsprüfung Deutsch (C1 level)"
+    cost: 66
+    parts: ["written", "oral"]
+    attempts_per_semester: 3
+  - step: 5
+    action: "Retake if failed"
+    max_attempts: "Depends on university (usually 2-3)"
+  - step: 6
+    action: "Ergänzungsprüfung passed → enrollment in main program"
+
+# External exam option (Externat)
+externat_lifehack:
+  description: |
+    If you already have C1 knowledge but no recognized certificate (or can't take ÖSD in time),
+    you can register for Ergänzungsprüfung at VWU as an EXTERNAL candidate
+    (without mandatory VWU course attendance).
+
+# Locations and costs
+locations:
+  vwu_wien:
+    name: "VWU Wien (Vienna, OeAD)"
+    full_name: "Vorstudienlehrgang der Wiener Universitäten"
+    cost_per_semester: 1800
+    currency: EUR
+    cost_per_ue: 5.62
+    hours_per_semester: "320 UE"
+    notes: "Updated prices from autumn 2025"
+    portal: vorstudienlehrgang.oead.at
+    update_2025: |
+      From autumn 2025, OeAD updated partner network (3 new partners)
+      Prices increased to ~€1,800/semester.
+      Old data €800-1,500 is OUTDATED!
+
+  vguh_graz:
+    name: "VGUH Graz (Graz, OeAD)"
+    full_name: "Vorstudienlehrgang der Grazer Universitäten"
+    cost_options:
+      - hours: "up to 24 hrs/week"
+        cost: 529
+        currency: EUR
+      - hours: ">24 hrs/week"
+        cost: 829
+        currency: EUR
+    portal: vorstudienlehrgang.oead.at/en/graz
+    warning: "DO NOT confuse with VWU Wien (~€1,800)!"
+
+  vss_linz:
+    name: "VSS Linz (Linz)"
+    cost_range: "€400-600/semester"
+    additional: "+ language course"
+    for_students_of: "JKU Linz"
+
+  vorstudienlehrgang_innsbruck:
+    name: "Vorstudienlehrgang Innsbruck"
+    cost_per_semester: 1200
+    currency: EUR
+    cost_for_2_semesters: 2400
+    portal: uibk.ac.at/weiterbildung/vorstudienlehrgang-deutsch
+
+  vplus_salzburg:
+    name: "VPLUS Salzburg"
+    cost_range: "€400-600/semester"
+    for_students_of: "Uni Salzburg (PLUS)"
+
+  private_vwu_schools:
+    name: "Private VWU schools (Vienna and others)"
+    cost_range: "€1,500-2,500/semester"
+    notes: "Prepare for the same Ergänzungsprüfung"
+
+# Ergänzungsprüfung exam dates
+ergaenzungspruefung_dates:
+  wintersemester:
+    - "September"
+    - "October-November"
+    - "January"
+  sommersemester:
+    - "March"
+    - "April-May"
+    - "June"
+  notes: "3 attempts per semester → if you fail VWU in autumn, you can take exam in January without losing the semester"
+
+# VWU and residence permit
+vwu_residence_permit:
+  permit_type: "Aufenthaltsbewilligung – Student (§64 NAG)"
+  description: |
+    VWU students receive full student residence permit.
+    VWU enrollment = valid basis for student residence permit, same as main program.
+
+# Ergänzungsprüfung details
+ergaenzungspruefung:
+  level: C1
+  cost: 66
+  currency: EUR
+  parts: ["written", "oral"]
+  validity: "Never expires"
+  accepted_by: "All Austrian universities"
+  notes: "Equivalent to C1, permanent validity (unlike ÖSD/Goethe 2-year limit)"
+
+# Critical warnings
+warnings:
+  price_update_2025:
+    severity: critical
+    description: "From autumn 2025, VWU Wien prices increased to ~€1,800/semester. Old data €800-1,500 is outdated!"
+
+  vwu_lock:
+    severity: critical
+    description: |
+      Once officially enrolled in VWU courses, many universities (especially TU Wien)
+      will ONLY accept Ergänzungsprüfung for final enrollment.
+      You CANNOT bring external certificate (ÖSD C1/Goethe C1) to exit early.
+    recommendation: "Choose your path BEFORE enrolling in VWU courses"
+
+  different_organizations:
+    severity: high
+    description: "VWU Wien and VGUH Graz are DIFFERENT organizations with different costs and processes!"
+
+source_urls:
+  - https://vorstudienlehrgang.oead.at/en/
+  - https://vorstudienlehrgang.oead.at/en/graz
+  - https://uibk.ac.at/weiterbildung/vorstudienlehrgang-deutsch
+last_verified: 2026-03-01

@@ -1,0 +1,388 @@
+id: uni-innsbruck
+
+name:
+  de: Universität Innsbruck
+  en: University of Innsbruck
+  ru: Университет Инсбрука
+  short: UIBK
+
+city: Innsbruck
+website: https://uibk.ac.at
+admission_portal: https://lfuonline.uibk.ac.at
+students_count: 29000
+founded: 1669
+
+unique_programs: ["Горные науки", "экология Альп", "туризм", "спортивные науки", "Peace and Conflict Studies"]
+
+# КРИТИЧНО: Самые ранние дедлайны среди публичных университетов Австрии!
+deadlines:
+  # Bachelor Non-EU — ОЧЕНЬ РАННИЙ ДЕДЛАЙН!
+  - semester: WS2026/27
+    category: non-eu
+    level: [bachelor]
+    programs: without-entrance-exam
+    submission:
+      start: 2026-04-01
+      end: 2026-05-15
+    enrollment:
+      start: 2026-07-13
+      end: 2026-09-05
+    notes: "САМЫЙ РАННИЙ дедлайн в Австрии! 15 мая (не август как в Вене). Рассмотрение 8-12 недель — подавай в начале апреля!"
+    source_url: https://www.uibk.ac.at/en/admission-department/application-and-admission-deadlines/
+    last_verified: 2026-03-01
+
+  - semester: SS2027
+    category: non-eu
+    level: [bachelor]
+    submission:
+      start: 2026-09-01
+      end: 2026-10-15
+    enrollment:
+      start: 2027-01-11
+      end: 2027-02-05
+    source_url: https://www.uibk.ac.at/en/admission-department/application-and-admission-deadlines/
+    last_verified: 2026-03-01
+
+  # Bachelor EU (более длинное окно)
+  - semester: WS2026/27
+    category: eu
+    level: [bachelor]
+    programs: without-entrance-exam
+    submission:
+      start: 2026-04-01
+      end: 2026-09-05
+    source_url: https://www.uibk.ac.at/en/admission-department/application-and-admission-deadlines/
+    last_verified: 2026-03-01
+
+# Enrollment periods
+enrollment_periods:
+  - semester: WS2026/27
+    standard:
+      start: 2026-07-13
+      end: 2026-09-05
+    exceptions:
+      start: 2026-09-06
+      end: 2026-10-31
+      notes: "Исключения — рискованно, семестр начинается 1 октября"
+  - semester: SS2027
+    standard:
+      start: 2027-01-11
+      end: 2027-02-05
+
+comparison_with_vienna:
+  innsbruck_submission: "1 апреля — 15 мая"
+  vienna_submission: "22 июня — 3 августа"
+  innsbruck_enrollment: "до 5 сентября"
+  vienna_enrollment: "до 31 октября"
+
+# Требования к немецкому языку — НИЖЕ ЧЕМ В ВЕНЕ!
+language_requirements:
+  german:
+    direct_admission: B2
+    submission_minimum: A2
+    notes: "Innsbruck требует B2 (не C1 как в Вене!). Это на уровень ниже."
+    certificates:
+      b2:
+        - name: ÖSD Zertifikat B2
+        - name: Goethe-Zertifikat B2
+        - name: TestDaF TDN3
+          notes: "TDN3 во всех разделах (не TDN4 как в Вене!)"
+        - name: ÖIF-Test B2
+        - name: EPD от Vorstudienlehrgang Innsbruck
+    certificate_validity_years: 2
+    source_url: https://www.uibk.ac.at/en/admission-department/
+    last_verified: 2026-03-01
+
+  english:
+    required_for: master-english-programs
+    min_level: B2
+    certificates:
+      - name: IELTS
+        min_score: "5.5–6.0"
+      - name: TOEFL iBT
+        min_score: "72–87"
+      - name: Cambridge B2 First (FCE)
+    source_url: https://www.uibk.ac.at/en/admission-department/
+    last_verified: 2026-03-01
+
+# Стоимость обучения
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://www.uibk.ac.at/studium/organisation/kosten-foerderungen/
+    last_verified: 2026-03-01
+
+  - category: eu
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+  - category: rwr_card
+    amount: 0
+    currency: EUR
+    period: semester
+    notes: "Red-White-Red Card и Family Permit = только ÖH-Beitrag. Значительная льгота!"
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+  - category: ukraine
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+# Вступительные экзамены
+entrance_exams:
+  bachelor:
+    with_exam:
+      - name: Psychology
+        description: "Тест на когнитивные и социальные компетенции + эссе"
+      - name: Architecture
+        description: "Творческий тест + портфолио"
+      - name: Sport Science
+        description: "Физические испытания + теоретический тест"
+      - name: Sport Management
+        description: "Собеседование + мотивационное письмо"
+      - name: All Teacher Training Programmes
+        description: "Отдельные процедуры по каждой специализации"
+
+    suspended_2026:
+      list:
+        - Biology
+        - Computer Science (Informatik)
+        - Pharmacy
+        - Management and Economics
+      notes: "ПРИОСТАНОВЛЕНЫ в 2026/27! Поступление без экзамена."
+
+  master:
+    - name: Psychology
+      description: "Тест + собеседование. Высокий конкурс."
+    - name: Peace and Conflict Studies
+      description: "Мотивационное письмо + собеседование"
+    - name: Digital Society, Social Innovation and Global Citizenship
+      description: "Мотивационное письмо + личная встреча"
+    - name: Psychotherapy
+      description: "Собеседование + психологический тест"
+
+  notes: "Для программ с отбором — ОТДЕЛЬНЫЕ сроки регистрации! Не совпадают с общим Non-EU дедлайном."
+  source_url: https://www.uibk.ac.at/en/college-service-center/admission-procedures/
+  last_verified: 2026-03-01
+
+# Vorstudienlehrgang Innsbruck — НЕ VWU Wien!
+vorstudienlehrgang:
+  name: Universitätslehrgang Deutsch (Vorstudienlehrgang Innsbruck)
+  applies: true
+  notes: "Своя программа при университете — НЕ венский VWU!"
+  website: https://www.uibk.ac.at/weiterbildung/vorstudienlehrgang-deutsch/
+
+  target_level: B2
+  difference_from_vienna: "VWU Wien нужен для C1. Innsbruck нужен для B2 — требования ниже."
+
+  modules:
+    - name: Modul I
+      target: "B1/B1+"
+      start_level: A2
+    - name: Modul II
+      target: "B2/B2+"
+      start_level: B1
+
+  costs:
+    amount: 1200
+    currency: EUR
+    period: semester
+    total_for_2_semesters: 2400
+    notes: "Уточнять на сайте вуза"
+
+  registration_deadline_ss2026: 2026-03-02
+  final_exam: "Ergänzungsprüfung = B2 эквивалент"
+  source_url: https://www.uibk.ac.at/weiterbildung/vorstudienlehrgang-deutsch/
+  last_verified: 2026-03-01
+
+# Программы без вступительного экзамена
+programs_without_exam:
+  humanities:
+    - Geschichte (History)
+    - Philosophie
+    - Germanistik
+    - Klassische Philologie
+    - Romanistik
+    - Anglistik und Amerikanistik
+    - Vergleichende Literaturwissenschaft
+    - Sprachwissenschaft
+    - Kunstgeschichte
+
+  sciences:
+    - Biologie (Biology)
+    - Chemie (Chemistry)
+    - Physik (Physics)
+    - Mathematik
+    - Informatik (Computer Science)
+    - Geographie
+    - Erdwissenschaften
+    - Umweltnaturwissenschaften
+
+  social:
+    - Wirtschaftswissenschaften
+    - Politikwissenschaft
+    - Soziologie
+    - Internationale Wirtschaft und Recht
+    - Statistik
+
+  law:
+    - Rechtswissenschaften
+    - Wirtschaftsrecht
+
+  engineering:
+    - Bauingenieurwesen
+    - Mechatronik
+    - Technische Mathematik
+    - Wirtschaftsingenieurwesen
+
+# Программы на английском
+programs_english:
+  bachelor:
+    notes: "Informatik — только немецкий."
+
+  master:
+    - name: English and American Studies
+      language: english
+    - name: Peace and Conflict Studies
+      language: english
+      has_entrance_exam: true
+    - name: Environmental Management of Mountain Areas
+      language: english
+    - name: Mechatronics
+      language: english
+    - name: Digital Society, Social Innovation and Global Citizenship
+      language: english
+      has_entrance_exam: true
+    - name: Pharmaceutical Sciences – Drug Development and Regulatory Affairs
+      language: english
+      has_entrance_exam: true
+    - name: Atmospheric Sciences
+      language: english
+    - name: Quantum Information Science and Technology
+      language: english
+
+  deadline_note: "Дедлайн для Non-EU на English Master — тот же 15 мая"
+  source_url: https://www.uibk.ac.at/en/programmes/
+  last_verified: 2026-03-01
+
+# Подача документов
+submission:
+  method: online_only
+  portal: https://lfuonline.uibk.ac.at
+  enrollment: in_person_only
+  notes:
+    - "Зачисление только лично — по доверенности нельзя"
+    - "Оригиналы должны ТОЧНО совпадать со сканами в системе"
+
+  documents:
+    - name: Паспорт
+      format: JPG или PDF
+      required: true
+    - name: Аттестат о среднем образовании
+      format: PDF
+      required: true
+      legalization: apostille
+      translation: sworn_translator
+      languages: [de, en]
+    - name: Транскрипт
+      format: PDF
+      required: true
+    - name: Сертификат немецкого A2
+      format: PDF
+      required: true
+      notes: "B2 нужен при зачислении, не при подаче!"
+    - name: Meldezettel
+      required: conditional
+      condition: "Если живёшь в Австрии"
+
+  source_url: https://www.uibk.ac.at/en/admission-department/
+  last_verified: 2026-03-01
+
+# I-MED — отдельный вуз!
+meduni_innsbruck:
+  notes: "Медицина в Инсбруке — ДРУГОЙ университет: Medizinische Universität Innsbruck (i-med.ac.at)"
+  website: https://i-med.ac.at
+  requires: MedAT
+  places:
+    humanmedizin: 370
+    zahnmedizin: 70
+  exam_date: 2026-07-03
+  registration_deadline: 2026-03-31
+  portal: https://medizinstudieren.at
+
+# Контакты
+contacts:
+  admission:
+    name: Zulassungsabteilung (Admission Department)
+    address: "Universitätshauptgebäude, Innrain 52d, 6020 Innsbruck (Erdgeschoss)"
+    email: studienabteilung@uibk.ac.at
+    phone: "+43 512 507-32602"
+    hours: "Пн–Пт 8:30–12:00; Пн и Ср дополнительно 13:30–16:00"
+
+  infopoint:
+    name: Student Infopoint
+    email: student.infopoint@uibk.ac.at
+    phone: "+43 512 507-9988"
+    chat: "uibk.ac.at (правый нижний угол)"
+
+  oeh:
+    name: ÖH Uni Innsbruck
+    address: "Josef-Hirn-Straße 7, 6020 Innsbruck"
+    email: info@oehweb.at
+    website: https://oehweb.at
+
+  vorstudienlehrgang:
+    website: https://uibk.ac.at/weiterbildung/vorstudienlehrgang-deutsch
+
+# Город
+city_info:
+  population: 130000
+  region: Tirol
+  advantages:
+    - "Горнолыжные курорты в 30 минутах"
+    - "На 15-20% дешевле Вены"
+    - "Компактный кампус"
+    - "English friendly (много туристов)"
+
+  cost_comparison:
+    innsbruck:
+      wg_room: "€400–600"
+      dormitory: "€350–500"
+      food: "€250–350/мес"
+      semesterticket: "€75/семестр"
+    vienna:
+      wg_room: "€550–800"
+      dormitory: "€400–600"
+      food: "€300–450/мес"
+
+  dormitories:
+    list:
+      - ÖH Wohnheim
+      - Canisianum
+      - Studentenheim Innsbruck
+    booking_advance: "минимум за 3 месяца"
+
+  transport:
+    semesterticket: "VVT (Tirol + Vorarlberg)"
+    nearby_cities: ["Hall in Tirol (15 мин)", "Salzburg", "Jenbach", "Kufstein"]

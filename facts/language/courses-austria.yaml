@@ -1,0 +1,367 @@
+# German Language Courses - Austria and Online
+# SSOT: Course providers, prices, learning time estimates
+# Last verified: 2026-03-01
+
+id: courses-austria
+
+# Learning time estimates (UE = Unterrichtseinheit, 45 min)
+learning_time_estimates:
+  a1:
+    hours_from_zero: "80-120 UE"
+    intensive_3_4h_day: "4-6 weeks"
+    partial_1_2h_day: "3-4 months"
+  a2:
+    hours_from_a1: "80-120 UE"
+    intensive_3_4h_day: "4-6 weeks"
+    partial_1_2h_day: "3-4 months"
+  b1:
+    hours_from_a2: "150-200 UE"
+    intensive_3_4h_day: "6-8 weeks"
+    partial_1_2h_day: "5-6 months"
+  b2:
+    hours_from_b1: "200-250 UE"
+    intensive_3_4h_day: "8-10 weeks"
+    partial_1_2h_day: "6-9 months"
+  c1:
+    hours_from_b2: "300-400 UE"
+    intensive_3_4h_day: "10-14 weeks"
+    partial_1_2h_day: "9-12 months"
+
+  total_zero_to_b2: "600-700 UE"
+  notes:
+    - "Individual variation is significant"
+    - "Russian speakers find German slightly easier - similar grammar structure"
+    - "Minimum for most universities: B2"
+
+# VHS (Volkshochschule) - Government-subsidized courses
+vhs:
+  description: "State adult education centers - subsidized courses throughout Austria"
+
+  wien:
+    website: vhs.at
+    consultation_test:
+      name: "Einstufungstest"
+      cost: 0
+      notes: "Free placement test and consultation"
+    standard_course:
+      levels: "A1-B2"
+      cost: 470
+      hours: "81 UE"
+      duration: "8-10 weeks"
+    intensive_b2:
+      level: "B2"
+      cost: 470
+      sessions: 27
+      duration: "10 weeks"
+    fokus_short:
+      level: "B2"
+      cost: 116
+      content: "Communication/Grammar"
+      duration: "4-5 weeks"
+    c1_fokus:
+      level: "C1"
+      cost: 134
+      format: "Online"
+      duration: "4-5 weeks"
+    osd_c1_exam_prep:
+      level: "C1"
+      cost: 201
+      notes: "Exam format prep only, not language teaching"
+    locations: "12 branches across districts + online option"
+
+  graz:
+    website: vhs-graz.at
+    cost_per_level: "€350-420"
+
+  innsbruck:
+    website: vhs-innsbruck.at
+    cost_per_level: "€320-400"
+
+  linz:
+    website: vhs-linz.at
+    cost_per_level: "€300-380"
+
+  salzburg:
+    website: vhs-salzburg.at
+    cost_per_level: "€320-400"
+
+  search_all_austria:
+    - vhs.at
+    - volkshochschule.at
+
+# Private language schools (Austria)
+private_schools:
+  sprachschule_aktiv_wien:
+    website: sprachschule-aktiv-wien.at
+    description: "Popular with foreign students, ÖIF-certified center"
+    courses:
+      intensivkurs_fulltime:
+        schedule: "Mon-Fri"
+        duration: "4 weeks"
+        cost: 499
+        regular_cost: 599
+      intensivkurs_8weeks:
+        duration: "8 weeks"
+        cost: 998
+      intensivkurs_light:
+        duration: "4 weeks"
+        cost: 379
+      semi_intensiv:
+        schedule: "Mon-Thu"
+        duration: "4 weeks"
+        cost: 299
+      online_evening:
+        duration: "4 weeks (B2: 8 weeks)"
+        cost: 499
+      oif_exam_prep:
+        duration: "4 weeks (B2: 8 weeks)"
+        cost: "€499/€998"
+
+  cib_sprachschule:
+    website: cib.or.at
+    description: "Specializes in ÖIF integration exams, accepts ÖIF-Gutscheine"
+    courses:
+      a2_intensiv_vm:
+        hours: "200 UE"
+        cost: 980
+        exam_extra: 200
+      a2_intensiv_evening:
+        hours: "200 UE"
+        cost: 980
+        accepts_voucher: true
+
+  goethe_institut_wien:
+    website: goethe.de/ins/de/de/ort/wie.html
+    description: "Most prestigious, certificates recognized worldwide"
+    courses:
+      a1_a2:
+        cost_range: "€300-600/course"
+        format: "In-person / Online"
+      b1_b2:
+        cost_range: "€500-900/course"
+        format: "In-person / Online"
+      c1:
+        cost_range: "€700-1,200/course"
+        format: "In-person / Online"
+    notes: "Significantly more expensive than VHS, but certificate valued higher"
+
+# University language centers (cheapest for enrolled students)
+uni_sprachzentren:
+  description: "Cheapest option for already enrolled students"
+  cost_range: "€50-200/semester"
+  access: "Only for enrolled students of that university"
+  warning: "Registration opens with course registration - fills up fast!"
+
+  institutions:
+    uni_wien:
+      name: "Sprachenzentrum"
+      website: szf.univie.ac.at
+      includes: "German courses for enrolled students"
+    tu_wien:
+      name: "SPIKO"
+      includes: "German and English"
+    uni_graz:
+      name: "Sprachenzentrum"
+      website: sprachen.uni-graz.at
+    jku_linz:
+      name: "Zentrum für Sprachen"
+    uni_innsbruck:
+      name: "Sprachenzentrum"
+    uni_salzburg:
+      name: "Sprachenzentrum"
+
+# Online resources (before arrival)
+online_resources:
+  free_or_cheap:
+    deutschakademie:
+      url: deutschakademie.de
+      levels: "A1-B2"
+      content: "Grammar exercises"
+      cost: 0
+    dw_deutsch_lernen:
+      url: dw.com/learn-german
+      levels: "A1-B2"
+      content: "Videos, podcasts, tests"
+      cost: 0
+    goethe_online:
+      url: goethe.de
+      levels: "A1-C2"
+      content: "Official courses with certificate"
+      cost_range: "€300-1,200/course"
+    babbel:
+      url: babbel.com
+      levels: "A1-B1"
+      content: "Conversational German"
+      cost: "€8-14/month"
+    duolingo:
+      url: duolingo.com
+      levels: "A1-A2"
+      content: "Basic entry"
+      cost: "Free (freemium)"
+    lingvist:
+      url: lingvist.io
+      content: "Vocabulary, speed"
+      cost: "€19/month"
+    pimsleur:
+      url: pimsleur.com
+      content: "Audio method, pronunciation"
+      cost: "€20-25/month"
+    italki:
+      url: italki.com
+      content: "Live lessons with native speakers"
+      cost: "€8-25/lesson"
+    easy_german_youtube:
+      url: youtube.com/@EasyGerman
+      levels: "B1-C1"
+      content: "Conversational, subtitles"
+      cost: 0
+    nicos_weg:
+      url: ardmediathek.de
+      levels: "A1-B1"
+      content: "Series with exercises"
+      cost: 0
+
+# Summer intensives
+summer_courses:
+  goethe_sommerkurs:
+    location: "Various cities in Austria"
+    cost: "€1,500-2,500 (+accommodation)"
+    duration: "4-6 weeks"
+  oead_sommersprachkurs:
+    location: "Vienna, Salzburg, others"
+    cost: "€500-1,200"
+    duration: "2-4 weeks"
+  sprachschule_aktiv_intensiv:
+    location: "Vienna"
+    cost: 499
+    duration: "4 weeks"
+  osd_vorbereitungskurs:
+    location: "Various centers"
+    cost: "€400-800"
+    duration: "4-8 weeks"
+
+# Exam preparation resources by certificate type
+exam_prep_resources:
+  oif_integrationspruefung:
+    - cib.or.at
+    - sprachschule-aktiv-wien.at
+    - "oif.ac.at (sample tests)"
+  goethe_b2_c1:
+    - "goethe.de (official Übungssets)"
+    - "TestDaF-Training"
+  testdaf:
+    - "testdaf.de (Modellsatz)"
+    - "Telc"
+    - "Sprachschule Aktiv"
+  osd_b2_c1:
+    - "oesd.at (Beispielprüfungen FREE!)"
+    - "VHS Wien"
+  dsh:
+    - "vorstudienlehrgang.oead.at (VWU preparation)"
+
+# Providers by city
+providers_by_city:
+  wien:
+    - name: "VHS Wien"
+      website: vhs.at
+      notes: "12 branches, online option"
+    - name: "Sprachschule Aktiv"
+      website: sprachschule-aktiv-wien.at
+      notes: "ÖIF, intensives"
+    - name: "CIB"
+      website: cib.or.at
+      notes: "ÖIF specialization"
+    - name: "Goethe Institut Wien"
+      website: goethe.de/ins/de/de/ort/wie.html
+      address: "1st district, Palais Wittgenstein"
+    - name: "ACTILINGUA"
+      website: actilingua.com
+      notes: "Intensives for foreigners"
+    - name: "DAS Sprachenstudio"
+      location: "Innenstadt"
+
+  innsbruck:
+    - name: "VHS Innsbruck"
+      website: vhs-innsbruck.at
+    - name: "Inlingua"
+      website: inlingua.at
+    - name: "Sprachschule Aktiv Innsbruck"
+      notes: "Branch of Sprachschule Aktiv"
+
+  graz:
+    - name: "VHS Graz"
+      website: vhs-graz.at
+    - name: "Caritas Akademie"
+      website: caritasakademie.at
+      notes: "ÖIF tests"
+    - name: "WIFI Steiermark"
+      website: wifi.at/stmk
+      notes: "Professional German"
+
+  linz:
+    - name: "VHS Linz"
+      website: vhs-linz.at
+    - name: "WIFI OÖ"
+      website: wifi.at/ooe
+
+  salzburg:
+    - name: "VHS Salzburg"
+      website: vhs-salzburg.at
+    - name: "Sprachschule Dialog"
+      website: sprachschule-dialog.at
+
+# Recommended strategy from Russia to B2
+strategy_russia_to_b2:
+  stage_1:
+    months: "1-2"
+    content: "DW Deutsch A1 + DeutschAkademie grammar"
+  stage_2:
+    months: "2-4"
+    content: "Babbel A2 + Nicos Weg episodes"
+  stage_3:
+    months: "4-7"
+    content: "iTalki (2-3 lessons/week) + DW B1/B2"
+  stage_4:
+    months: "7-10"
+    content: "Goethe Institut Online B2 + exam preparation"
+
+# Cost comparison by goal
+cost_by_goal:
+  a2_fast_for_documents:
+    path: "Online Babbel/DW + self-study ÖIF exam"
+    cost: "€0-200"
+  b2_for_german_university:
+    path: "VHS Wien (2-3 levels)"
+    cost: "€940-1,410"
+  c1_for_vienna_medicine:
+    path: "VHS Wien + targeted TestDaF/Goethe C1 prep"
+    cost: "€1,200-2,000"
+  b1_fast_for_residence_integration:
+    path: "Sprachschule Aktiv (Intensivkurs 4-8 weeks)"
+    cost: "€499-998"
+  academic_german_as_student:
+    path: "Uni Sprachzentrum of your university"
+    cost: "€50-200/semester"
+  minimal_budget_flexible_pace:
+    path: "DW + DeutschAkademie + iTalki (2/week) + VHS Fokus"
+    cost: "€300-600"
+
+# Exam center costs (Vienna)
+exam_costs_wien:
+  oif_a2: "€200-220"
+  oif_b1: "€200-220"
+  oif_b2: "€200-220"
+  goethe_b2: "€180-220"
+  goethe_c1: "€190-230"
+  testdaf: "€175-195"
+  osd_b2: "€140-180"
+  osd_c1: "€150-190"
+  dsh: "€150-200"
+
+exam_schedule_portal: "sprachportal.at/kurse-und-pruefungen/pruefungstermine/"
+
+source_urls:
+  - https://www.vhs.at
+  - https://www.sprachschule-aktiv-wien.at
+  - https://www.goethe.de/ins/de/de/ort/wie.html
+last_verified: 2026-03-01

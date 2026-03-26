@@ -1,0 +1,297 @@
+id: tu-wien
+
+name:
+  de: Technische Universität Wien
+  en: Vienna University of Technology
+  ru: Венский технический университет
+
+city: Wien
+website: https://www.tuwien.at
+admission_portal: https://tiss.tuwien.ac.at
+ranking: "QS Top 150 Engineering & Technology (2025)"
+students_count: 28000
+
+# Дедлайны подачи документов
+deadlines:
+  # Bachelor / Master без вступительного экзамена
+  - semester: WS2026/27
+    category: non-eu
+    level: [bachelor, master]
+    programs: all-without-entrance-exam
+    submission:
+      start: 2026-01-16
+      end: 2026-07-15
+    enrollment:
+      start: 2026-07-01
+      end: 2026-10-31
+    notes: "Документы должны быть ПОЛУЧЕНЫ до дедлайна (не отправлены!). Срок рассмотрения 10-12 недель."
+    source_url: https://www.tuwien.at/studium/zulassung/bachelorstudien/internationales-reifezeugnis
+    last_verified: 2026-03-01
+
+  - semester: SS2027
+    category: non-eu
+    level: [bachelor, master]
+    programs: all-without-entrance-exam
+    submission:
+      start: 2026-07-16
+      end: 2027-01-15
+    enrollment:
+      start: 2027-01-01
+      end: 2027-03-31
+    source_url: https://www.tuwien.at/studium/zulassung/bachelorstudien/internationales-reifezeugnis
+    last_verified: 2026-03-01
+
+# Требования к немецкому языку
+language_requirements:
+  german:
+    direct_admission: C1
+    vwu_admission: A2
+    notes: "TU Wien требует C1 (не B2 как некоторые другие вузы!)"
+    certificates:
+      c1:
+        - name: ÖSD Zertifikat C1
+        - name: Goethe-Zertifikat C1
+        - name: telc Deutsch C1 Hochschule
+        - name: DSH2
+        - name: TestDaF TDN4
+          notes: "TDN4 во ВСЕХ 4 частях"
+        - name: DSD II
+        - name: Ergänzungsprüfung Deutsch (VWU)
+      a2:
+        - name: ÖSD Zertifikat A2
+        - name: Goethe-Zertifikat A2
+        - name: ÖIF Test A2
+        - name: DTÖ A2/B1
+        - name: DSD I
+    certificate_validity_years: 2
+    source_url: https://www.tuwien.at/studium/zulassung/bachelorstudien/internationales-reifezeugnis/deutschkenntnisse
+    last_verified: 2026-03-01
+
+  english:
+    required_for: master-english-programs
+    min_level: B2
+    certificates:
+      - name: TOEFL iBT
+        min_score: 87
+        notes: "включая Home Edition"
+      - name: IELTS Academic
+        min_score: 6.5
+        notes: "включая Online"
+      - name: Cambridge C1 Advanced (CAE)
+        min_score: 160
+      - name: Cambridge B2 First (FCE)
+        min_score: 160
+        notes: "grade C или выше"
+    exemptions:
+      - "Bachelor из EU/EEA, Швейцарии, UK, США, Канады, Австралии, Новой Зеландии (на английском)"
+    not_accepted:
+      - "Гражданство англоязычной страны (нужен сертификат)"
+    certificate_validity_years: 2
+    source_url: https://www.tuwien.at/studium/zulassung/masterstudien/inter-nationaler-bachelorabschluss/englischkenntnisse
+    last_verified: 2026-03-01
+
+# Стоимость обучения
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://www.tuwien.at/studium/zulassung/oeh-beitrag-und-studienbeitrag/studienbeitrag
+    last_verified: 2026-03-01
+
+  - category: eu
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    source_url: https://www.tuwien.at/studium/zulassung/oeh-beitrag-und-studienbeitrag/studienbeitrag
+    last_verified: 2026-03-01
+
+  - category: ukraine
+    amount: 0
+    currency: EUR
+    period: semester
+    notes: "Автоматическое освобождение для граждан Украины"
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+# Вступительные экзамены
+entrance_exams:
+  - programs: [Informatik, Computer Engineering, Wirtschaftsinformatik]
+    places: 670
+    notes: "670 мест суммарно на 3 программы"
+    registration:
+      start: 2026-04-01T12:00:00
+      end: 2026-05-04T23:59:00
+    self_assessment_deadline: 2026-05-04
+    exam_date: 2026-07-13
+    exam_format:
+      - step: 1
+        name: Online self-assessment (VoR-Phase)
+        location: online
+        deadline: 2026-05-04
+      - step: 2
+        name: Ranking test
+        location: Wien (очно)
+        content: "когнитивные способности, логика, числовые ряды, пространственное мышление"
+    cost:
+      amount: 50
+      currency: EUR
+    source_url: https://www.tuwien.at/studium/studienangebot/bachelorstudien/informatik-und-wirtschaftsinformatik/aufnahmeverfahren
+    last_verified: 2026-03-01
+
+  - programs: [Architektur]
+    places: 625
+    registration:
+      start: 2026-04-01T12:00:00
+      end: 2026-05-04T23:59:00
+    exam_date: 2026-07-10
+    exam_format:
+      - step: 1
+        name: Motivationsschreiben
+        deadline: 2026-05-04
+        required: true
+      - step: 2
+        name: Online self-assessment (VoR-Phase)
+        deadline: 2026-05-04
+      - step: 3
+        name: Ranking test
+        location: Wien (очно)
+    requirements:
+      - name: Darstellende Geometrie
+        hours: 150
+        notes: "Если нет в аттестате — дополнительный экзамен"
+    cost:
+      amount: 50
+      currency: EUR
+    source_url: https://www.tuwien.at/studium/studienangebot/bachelorstudien/architektur/aufnahmeverfahren
+    last_verified: 2026-03-01
+
+  - programs: [Raumplanung]
+    places: 200
+    registration:
+      start: 2026-04-01
+      end: 2026-05-04
+    exam_date: 2026-07-10  # или 13 июля
+    exam_format:
+      - step: 1
+        name: Motivationsschreiben
+        deadline: 2026-05-04
+      - step: 2
+        name: Ranking test
+    source_url: https://www.tuwien.at/studium/studienangebot/bachelorstudien/raumplanung-und-raumordnung
+    last_verified: 2026-03-01
+
+# Программы Bachelor
+programs_bachelor:
+  with_entrance_exam:
+    - name: Architektur
+      places: 625
+    - name: Raumplanung
+      places: 200
+    - name: Informatik
+      places: 670
+      shared_quota: true
+    - name: Computer Engineering
+      shared_quota: true
+    - name: Wirtschaftsinformatik
+      shared_quota: true
+
+  without_entrance_exam:
+    - Bauingenieurwesen
+    - Elektrotechnik
+    - Maschinenbau
+    - Technische Chemie
+    - Technische Physik
+    - Technische Mathematik
+    - Geodäsie und Geoinformation
+    - Verfahrenstechnik
+    - Materialwissenschaften
+    - Financial and Actuarial Mathematics
+    - Statistics and Mathematical Methods in Economics
+
+# Программы Master на английском
+programs_master_english:
+  - Computer Engineering
+  - Data Science and Engineering
+  - Logic and Computation
+  - Computational Science and Engineering
+  - Materials Sciences
+  - Business Informatics
+  - Environmental Engineering
+  - Building Science and Environment
+  - Quantum Information Science and Technology
+  - Biomedical Engineering
+  - Green Chemistry
+  - Digital Civil Engineering Science
+
+# VWU специфика для TU Wien
+vwu:
+  applies: true
+  trap: "VWU Lock: после зачисления на VWU нельзя сдать внешний C1 (ÖSD/Goethe) — только Ergänzungsprüfung от VWU"
+  additional_exams_possible:
+    - Mathematik
+    - Physik
+    - Chemie
+    - Darstellende Geometrie
+  source_url: https://www.tuwien.at/studium/zulassung/bachelorstudien/internationales-reifezeugnis/zusatz-und-ergaenzungspruefungen
+  last_verified: 2026-03-01
+
+# Документы для подачи (Bachelor, Non-EU)
+required_documents:
+  submission_method: mail_only
+  address: |
+    TU Wien
+    Admission Office
+    Karlsplatz 13
+    1040 Vienna, Austria
+  notes:
+    - "Только по почте (не онлайн, не лично без записи)"
+    - "Не использовать DHL/UPS/FedEx из стран вне EU — таможенные проблемы"
+    - "Заказное письмо (Registered Mail / Einschreiben)"
+  documents:
+    - name: Подписанная форма заявления
+      required: true
+      notes: "Скачать с сайта, заполнить, подписать от руки"
+    - name: Аттестат о среднем образовании
+      required: true
+      legalization: apostille
+      translation: sworn_translator
+      languages: [de, en]
+    - name: Сертификат немецкого языка
+      required: true
+      levels: [A2, C1]
+      legalization: copy
+    - name: Копия паспорта
+      required: true
+      notes: "Все страницы"
+    - name: Meldebestätigung
+      required: conditional
+      condition: "Только для non-EU с австрийским адресом"
+  source_url: https://www.tuwien.at/studium/zulassung/bachelorstudien/internationales-reifezeugnis
+  last_verified: 2026-03-01
+
+# Контакты
+contacts:
+  admission_office:
+    address: "Karlsplatz 13, 1040 Wien (Stiege 1, EG)"
+    email: admission@tuwien.ac.at
+    phone: "+43 1 58801 41188"
+    hours: "Пн, Вт, Чт 09:30–12:00; Ср 13:30–16:00 (по записи)"
+    appointment_url: https://www.tuwien.at/studium/zulassung/kontakt
+
+  iwec:
+    name: International Welcome and Engagement Center
+    email: international@tuwien.ac.at
+    address: "Wiedner Hauptstraße 8-10, 1040 Wien"
+    notes: "Для уже поступивших международных студентов"

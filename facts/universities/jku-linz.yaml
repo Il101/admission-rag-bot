@@ -1,0 +1,282 @@
+id: jku-linz
+
+name:
+  de: Johannes Kepler Universität Linz
+  en: Johannes Kepler University Linz
+  ru: Университет Йоханнеса Кеплера (Линц)
+  short: JKU
+
+city: Linz
+website: https://www.jku.at
+admission_portal: https://kusss.jku.at
+enrollment_portal: https://zulassung.jku.at
+students_count: 24000
+founded: 1966
+
+# Уникальные преимущества
+unique_features:
+  - "Мировой центр AI-исследований (институт Хохрайтера — создателя LSTM)"
+  - "Единственный университет Австрии с Bachelor AI полностью на английском"
+  - "Компактный кампус — все факультеты в одном месте"
+
+# КРИТИЧНО: Трёхэтапная подача!
+submission:
+  method: online_then_mail_then_in_person
+  steps:
+    - step: 1
+      name: "Онлайн-регистрация"
+      portal: "zulassung.jku.at или portal.jku.at"
+      notes: "PDF документы без нотариального заверения"
+    - step: 2
+      name: "Отправка оригиналов по почте"
+      notes: "JKU запросит позже, DHL/UPS"
+    - step: 3
+      name: "Личная явка"
+      notes: "Admissions Office для получения JKU Card"
+
+  address: |
+    Johannes Kepler Universität Linz
+    Zulassungsservice (Admissions Office)
+    Altenberger Straße 69
+    4040 Linz, Austria
+
+  notes:
+    - "Подача заявки — БЕСПЛАТНО"
+    - "Заявки через агентства НЕ ОБРАБАТЫВАЮТСЯ!"
+    - "Оригиналы JKU может вернуть (за твой счёт) или хранить до визита"
+    - "Если апостиль задерживается — пиши через портал с доказательством"
+
+  source_url: https://www.jku.at/en/degree-programs/prospective-students/register-to-enroll/
+  last_verified: 2026-03-01
+
+# Дедлайны — КРИТИЧЕСКИЕ ИЗМЕНЕНИЯ!
+deadlines:
+  - semester: WS2026/27
+    category: non-eu
+    level: [bachelor, master]
+    submission:
+      start: 2026-02-06
+      end: 2026-03-31
+    enrollment:
+      end: 2026-10-31
+    notes: "Срок обработки 10-12 недель. Если апостиль задерживается — пиши через портал!"
+    source_url: https://www.jku.at/en/degree-programs/students/dates-deadlines/
+    last_verified: 2026-03-01
+
+  - semester: SS2027
+    category: non-eu
+    level: [bachelor, master]
+    submission:
+      start: 2026-09-06
+      end: 2026-10-31
+    enrollment:
+      end: 2027-03-31
+    source_url: https://www.jku.at/en/degree-programs/students/dates-deadlines/
+    last_verified: 2026-03-01
+
+# Вступительные экзамены
+entrance_exams:
+  bachelor:
+    - name: Human Medicine (Humanmedizin)
+      places: 320
+      test: MedAT
+      registration:
+        portal: https://medizinstudieren.at
+        start: 2026-03-02
+        end: 2026-03-31
+      exam_date: 2026-07-03
+      results: "Начало августа 2026"
+      enrollment: "04.08.2026 – 05.09.2026"
+      language: german_only
+      german_required: C1
+      special_places:
+        upper_austria: 10
+        lower_austria: 4
+        oegk: 2
+      notes:
+        - "MedAT один раз в год!"
+        - "Тест ТОЛЬКО на немецком — английской версии нет"
+        - "C1 немецкий обязателен!"
+
+    - name: International Business Administration (IBA)
+      language: english
+      steps:
+        - "Онлайн-регистрация через JKU MyAdmission"
+        - "Application Video (~2 мин, на английском)"
+        - "Интервью (онлайн или очно)"
+        - "Завершение зачисления"
+        - "Оплата tuition fee"
+      source_url: https://jku.at/en/ba-international-business-administration/admission/
+
+    - name: Teacher Education for Secondary Schools
+
+  master:
+    - name: Psychology
+    - name: Global Business
+    - name: Leading Innovative Organizations
+
+  source_url: https://www.jku.at/en/degree-programs/prospective-students/register-to-enroll/
+  last_verified: 2026-03-01
+
+# Требования к языкам
+language_requirements:
+  german:
+    submission_minimum: A2
+    enrollment: B2
+    medicine: C1
+    not_required_for:
+      - AI Bachelor
+      - AI Master
+      - Biological Chemistry
+      - IBA
+    certificates:
+      a2: ["ÖSD ZA2", "ÖIF Test A2", "Goethe A2", "DTÖ A2/B1"]
+      b2: ["ÖSD B2", "ÖIF B2", "Goethe B2", "TestDaF TDN4", "DSH-1"]
+      c1: ["ÖSD C1", "Goethe C1", "TestDaF TDN5", "DSH-2"]
+    certificate_validity_years: 2
+    source_url: https://www.jku.at/en/degree-programs/students/start-your-studies/proof-of-language-proficiency/
+    last_verified: 2026-03-01
+
+  english:
+    required_for:
+      - AI Bachelor
+      - AI Master
+      - Biological Chemistry
+      - IBA
+    min_level: "B2–C1"
+    notes: "Если оценки в аттестате были на английском — обычно принимается как proof"
+
+# Программы на английском — уникальное преимущество JKU!
+programs_english:
+  bachelor:
+    - name: Artificial Intelligence
+      notes: "🏆 Уникально для Австрии!"
+    - name: Biological Chemistry
+    - name: International Business Administration
+      notes: "С вступительным интервью"
+    - name: Chemistry and Chemical Technology
+      notes: "Частично английский"
+
+  master:
+    - name: Artificial Intelligence
+      notes: "🏆 Флагман JKU"
+    - name: Biological Chemistry
+    - name: Computer Science (Informatik)
+      notes: "Частично английский"
+    - name: Data Science
+    - name: Mechatronics
+    - name: Comparative Social Policy and Welfare
+      notes: "Полностью английский"
+    - name: Business Informatics
+      notes: "Частично английский"
+
+  source_url: https://www.jku.at/en/degree-programs/academic-degree-programs/all-degree-programs/
+  last_verified: 2026-03-01
+
+# Факультеты
+faculties:
+  tnf:
+    name: "Технические и естественные науки"
+    bachelor: ["AI (EN)", "Biological Chemistry (EN)", "Business Informatics", "Chemistry (EN)", "Computer Science", "Electronics", "Mechatronics", "Physics", "Technical Mathematics"]
+    master: ["AI (EN)", "Biophysics", "Biological Chemistry (EN)", "Computer Science", "Electronics", "Industrial Mathematics", "Information Electronics", "Mechatronics", "Nanoscience", "Physics"]
+
+  sowi:
+    name: "Социальные и экономические науки"
+    bachelor: ["Business Administration", "Business & Economics", "Business Education", "Business Informatics", "Business Law", "IBA (EN)", "Social & Behavioral Science", "Sociology"]
+    master: ["Accounting & Reporting", "Business Informatics", "Controlling", "Economics (EN)", "HR Management", "IBA", "Marketing", "Quantitative Economics", "Sociology"]
+
+  recht:
+    name: "Право"
+    diploma: ["Rechtswissenschaften (Jus)", "Multimedia-Diplomstudium Recht (Fernstudium)"]
+
+  medizin:
+    name: "Медицина (с 2014)"
+    bachelor: ["Human Medicine (DE, с MedAT)"]
+    master: ["Human Medicine (продолжение Bachelor)"]
+
+  lit:
+    name: "Linz Institute of Technology"
+    programs: ["Engineering Science (MINT-interdisciplinary)"]
+
+# Стоимость
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://www.jku.at/en/degree-programs/students/start-your-studies/pay-austrian-student-union-fees-and-tuition/
+    last_verified: 2026-03-01
+
+  - category: eu
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+    last_verified: 2026-03-01
+
+# AI исследования
+ai_research:
+  institute: "LIT AI Lab (Linz Institute of Technology AI Laboratory)"
+  notable_people:
+    - name: Sepp Hochreiter
+      role: "Создатель LSTM"
+    - name: Günter Klambauer
+    - name: Johannes Brandstetter
+  notes: "Один из ведущих AI-центров в Европе"
+
+# Инфраструктура
+infrastructure:
+  - name: KUSSS
+    url: https://kusss.jku.at
+    purpose: "Регистрация на курсы и экзамены, оценки, расписание"
+  - name: JKU Moodle
+    purpose: "Учебные материалы"
+  - name: JKU Card
+    purpose: "Студенческий билет + библиотека + транспортные льготы"
+    replacement_cost: 15
+  - name: Career Center JKU
+    purpose: "Стажировки, карьерные события"
+  - name: JKU OPEN LAB
+    purpose: "Бесплатные научные мероприятия"
+
+# Город
+city_info:
+  cost_comparison: "На 20-30% дешевле Вены"
+  dormitory_cost: "€250–350/месяц"
+  average_expenses: "€800–1000/месяц"
+  major_employers: ["Voestalpine", "Rosenbauer", "FACC", "Anton Paar"]
+  campus_location: "Компактный, все факультеты в одном месте"
+  transport: "20 мин на трамвае от центра"
+
+# Контакты
+contacts:
+  admissions:
+    name: Zulassungsservice (Admissions Office)
+    address: "Bank Building (Bankgebäude), EG, Altenberger Straße 69, 4040 Linz"
+    phone: "+43 732 2468 2010"
+    email: admission@jku.at
+    appointment: https://termin-lso.jku.at/qmaticwebbooking/
+    phone_hours:
+      monday: "10:00–12:00"
+      tuesday: "13:00–15:00"
+      wednesday: "10:00–12:00"
+      thursday: "13:00–15:00"
+      friday: "11:00–12:00"
+    in_person_hours:
+      monday: "13:00–15:00"
+      tuesday: "08:00–10:00"
+      wednesday: "14:00–16:00"
+      thursday: "10:00–12:00"
+      friday: "только по записи"
+
+  medicine:
+    email: aufnahmeverfahren@jku.at
+    phone: "+43 732 2468 3102"
+    medat_portal: https://medizinstudieren.at

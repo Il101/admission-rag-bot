@@ -1,0 +1,225 @@
+# BOKU Wien - Universität für Bodenkultur Wien
+# SSOT: Deadlines, fees, language requirements
+# Last verified: 2026-03-01
+
+id: boku-wien
+
+name:
+  de: Universität für Bodenkultur Wien
+  en: University of Natural Resources and Life Sciences, Vienna
+  ru: Венский университет природных ресурсов
+
+short_name: BOKU
+city: Wien
+website: https://boku.ac.at
+admission_portal: https://online.boku.ac.at
+students_count: 12000
+founded: 1872
+
+description: "Единственный аграрный университет Австрии. Специализация: сельское хозяйство, биотехнологии, экология, ландшафтная архитектура, лесное хозяйство."
+
+unique_programs:
+  - "Agrarwissenschaften (сельское хозяйство)"
+  - "Forstwirtschaft (лесное хозяйство)"
+  - "Lebensmittel- und Biotechnologie"
+  - "Landschaftsplanung und Landschaftsarchitektur"
+  - "Umwelt- und Bioressourcenmanagement"
+  - "Weinbau, Önologie und Weinwirtschaft (виноделие)"
+  - "Holz- und Naturfasertechnologie"
+
+# Дедлайны
+deadlines:
+  - semester: WS2026/27
+    category: non-eu
+    level: [bachelor]
+    submission:
+      start: 2026-06-22
+      end: 2026-08-03
+    enrollment:
+      start: 2026-07-13
+      end: 2026-10-31
+    notes: "Сроки схожи с Uni Wien (венские университеты координируют)"
+    source_url: https://boku.ac.at/studienservices/studium-im-ueberblick/bachelorstudium
+    last_verified: 2026-03-01
+
+  - semester: WS2026/27
+    category: eu
+    level: [bachelor]
+    submission:
+      start: 2026-06-22
+      end: 2026-09-05
+    enrollment:
+      start: 2026-07-13
+      end: 2026-10-31
+    source_url: https://boku.ac.at/studienservices/studium-im-ueberblick/bachelorstudium
+    last_verified: 2026-03-01
+
+  - semester: SS2027
+    category: non-eu
+    level: [bachelor]
+    submission:
+      start: 2026-12-01
+      end: 2027-01-15
+    notes: "Летний семестр — меньше программ начинается"
+    source_url: https://boku.ac.at/studienservices/studium-im-ueberblick/bachelorstudium
+    last_verified: 2026-03-01
+
+  - semester: WS2026/27
+    category: all
+    level: [master]
+    submission:
+      start: 2026-03-01
+      end: 2026-05-31
+    notes: "Master — раньше чем Bachelor! Многие English Masters."
+    source_url: https://boku.ac.at/studienservices/studium-im-ueberblick/masterstudium
+    last_verified: 2026-03-01
+
+# КЛЮЧЕВОЕ: Требования к языку — B2 (не C1!)
+language_requirements:
+  german:
+    direct_admission: B2
+    submission_minimum: A2
+    notes: "BOKU требует B2 (НЕ C1 как TU Wien / Uni Wien). Один из немногих венских вузов с B2."
+
+    certificates:
+      b2:
+        - ÖSD Zertifikat B2
+        - Goethe-Zertifikat B2
+        - telc Deutsch B2
+        - TestDaF TDN3
+        - ÖIF B2
+
+    vwu_available: true
+    vwu_name: "VWU Wien (Vorstudienlehrgang der Wiener Universitäten)"
+
+    certificate_validity_years: 2
+    source_url: https://boku.ac.at/studienservices/studium-im-ueberblick/zulassung/deutschkenntnisse
+    last_verified: 2026-03-01
+
+  english:
+    required_for: "English Master programmes"
+    min_level: B2
+    certificates:
+      - name: TOEFL iBT
+        min_score: 79
+      - name: IELTS Academic
+        min_score: 6.0
+      - name: Cambridge CAE/CPE
+        min_score: "Grade C"
+    notes: "Требования ниже чем в TU Wien / WU Wien"
+    source_url: https://boku.ac.at/studienservices/studium-im-ueberblick/masterstudium
+
+# Стоимость обучения
+tuition:
+  - category: non-eu
+    amount: 726.72
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 751.92
+    source_url: https://boku.ac.at/studienservices/studienorganisation/beitraege
+
+  - category: eu
+    amount: 0
+    currency: EUR
+    period: semester
+    additional:
+      - name: ÖH-Beitrag
+        amount: 25.20
+    total: 25.20
+
+# Подача документов
+submission:
+  method: online_only
+  portal: https://online.boku.ac.at
+  enrollment: in_person
+  notes: "Онлайн-подача, личное зачисление"
+
+  documents:
+    - name: Паспорт
+      required: true
+    - name: Аттестат о среднем образовании
+      required: true
+      legalization: apostille
+      translation: sworn_translator
+      languages: [de, en]
+    - name: Транскрипт
+      required: true
+      translation: required
+    - name: Сертификат немецкого A2/B2
+      required: true
+      validity: 2 years
+    - name: Фото 35x45 мм
+      required: true
+
+  source_url: https://boku.ac.at/studienservices/studium-im-ueberblick/zulassung
+  last_verified: 2026-03-01
+
+# VWU Info
+vwu:
+  available: true
+  name: "VWU Wien (Vorstudienlehrgang der Wiener Universitäten)"
+  shared_with:
+    - Uni Wien
+    - TU Wien
+    - WU Wien
+    - MedUni Wien
+    - Vetmeduni Wien
+  cost_per_semester: 1800
+  notes: "BOKU — один из 6 венских университетов в системе VWU"
+
+# English Master programmes
+english_masters:
+  - name: Environmental Sciences (ENVEURO)
+    type: Master
+    duration: "4 семестра"
+    language: english
+    erasmus_mundus: true
+  - name: Food Science & Technology
+    type: Master
+    duration: "4 семестра"
+    language: english
+  - name: Applied Limnology
+    type: Master
+    duration: "4 семестра"
+    language: english
+  - name: Sustainable Development, Management and Policy
+    type: Master
+    duration: "4 семестра"
+    language: english
+  - name: Natural Resources Management and Ecological Engineering (NARMEE)
+    type: Master
+    duration: "4 семестра"
+    language: english
+    erasmus_mundus: true
+
+# Контакты
+contacts:
+  studienservices:
+    name: "Study Services"
+    address: "Peter-Jordan-Straße 70, 1190 Wien"
+    email: studienservices@boku.ac.at
+    phone: "+43 1 47654 10400"
+    website: https://boku.ac.at/studienservices
+    hours: "Пн–Пт по записи"
+
+  international:
+    name: "International Relations"
+    email: international@boku.ac.at
+    phone: "+43 1 47654 10401"
+
+# Плюсы для абитуриентов
+advantages:
+  - "B2 немецкий (не C1!) — проще поступить"
+  - "Уникальные программы: сельское хозяйство, виноделие, лесное дело"
+  - "English Masters с Erasmus Mundus стипендиями"
+  - "Меньше студентов = больше внимания"
+  - "Кампус в зелёной зоне Вены (19 район)"
+  - "Тесная связь с индустрией + практика"
+
+source_urls:
+  - https://boku.ac.at
+  - https://boku.ac.at/studienservices
+last_verified: 2026-03-01
