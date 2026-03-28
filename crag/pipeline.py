@@ -17,6 +17,71 @@ from typing import List, Optional, Any, Callable, Awaitable
 logger = logging.getLogger(__name__)
 
 
+_HOUSING_KEYWORDS = (
+    "жиль", "общежит", "studentenheim", "wg ", "квартир", "аренд",
+    "wohnung", "miet", "meldezettel", "переезд",
+)
+_FOOD_KEYWORDS = (
+    "питан", "еда", "столов", "mensa", "кафе", "ресторан", "перекус",
+    "vegan", "vegetarian", "веган", "вегетари", "canteen", "cafeteria",
+    "meal", "меню",
+)
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    lowered = text.lower()
+    return any(kw in lowered for kw in keywords)
+
+
+def _has_topic(doc: Any, topic: str) -> bool:
+    metadata = getattr(doc, "metadata", {}) or {}
+    return str(metadata.get("topic", "")).strip().lower() == topic
+
+
+def _doc_is_housing(doc: Any) -> bool:
+    metadata = getattr(doc, "metadata", {}) or {}
+    content = getattr(doc, "page_content", "") or ""
+    text = f"{content}\n{json.dumps(metadata, ensure_ascii=False)}"
+    return _has_topic(doc, "housing") or _contains_any(text, _HOUSING_KEYWORDS)
+
+
+def _doc_is_food(doc: Any) -> bool:
+    metadata = getattr(doc, "metadata", {}) or {}
+    content = getattr(doc, "page_content", "") or ""
+    text = f"{content}\n{json.dumps(metadata, ensure_ascii=False)}"
+    return _contains_any(text, _FOOD_KEYWORDS)
+
+
+def apply_entity_grounding_guardrails(question: str, docs: List[Any]) -> List[Any]:
+    """Prevent cross-entity fact mixing in final context.
+
+    For housing questions, removes food-only chunks (e.g., Mensa/menus)
+    to avoid leaking unrelated claims into housing answers.
+    """
+    if not docs:
+        return docs
+
+    q = (question or "").lower()
+    asks_housing = _contains_any(q, _HOUSING_KEYWORDS)
+
+    # Main safety net for the observed failure mode:
+    # housing question + accidental food chunk contamination.
+    # Applied even if question contains food words to prevent "Mensa -> dormitory"
+    # leakage unless the chunk itself is explicitly housing-related.
+    if asks_housing:
+        filtered = [doc for doc in docs if not (_doc_is_food(doc) and not _doc_is_housing(doc))]
+        if filtered:
+            removed = len(docs) - len(filtered)
+            if removed > 0:
+                logger.info(
+                    "Grounding guardrail removed %d food-only docs for housing question",
+                    removed,
+                )
+            return filtered
+
+    return docs
+
+
 def _get_rerank_soft_timeout_sec() -> float:
     """Soft timeout for reranking; 0 disables timeout."""
     raw = os.getenv("RERANK_SOFT_TIMEOUT_SEC", "0").strip()
@@ -284,6 +349,62 @@ class GradeStep(PipelineStep):
         )
 
 
+class TagBoostStep(PipelineStep):
+    """Apply tag-based boosting to documents.
+
+    Uses domain tags to boost relevance of documents that match query tags.
+    This helps prioritize documents from the correct domain (housing vs food, etc.).
+    """
+    name = "tag_boost"
+
+    def __init__(self, boost_factor: float = 0.3):
+        """Initialize tag boost step.
+
+        Args:
+            boost_factor: Weight of tag boost (0.0 = no boost, 1.0 = full boost)
+        """
+        self.boost_factor = boost_factor
+
+    async def execute(self, ctx: PipelineContext, rag: Any) -> None:
+        if not ctx.graded_docs:
+            return
+
+        from crag.tag_set_layer import tag_based_reranking
+
+        t0 = time.monotonic()
+
+        # Convert docs to dict format for tag_based_reranking
+        docs_as_dicts = []
+        for doc in ctx.graded_docs:
+            docs_as_dicts.append({
+                "content": doc.page_content,
+                "metadata": doc.metadata,
+                "score": 0.5,  # Use neutral score, we care about relative reranking
+            })
+
+        # Apply tag-based reranking
+        ranked = tag_based_reranking(
+            docs_as_dicts,
+            ctx.rewritten_question or ctx.question,
+            factor=self.boost_factor,
+        )
+
+        # Sort graded_docs based on tag-adjusted scores
+        doc_order = {id(doc_dict["content"]): i for i, (doc_dict, _) in enumerate(ranked)}
+
+        # Reorder graded_docs
+        ctx.graded_docs = sorted(
+            ctx.graded_docs,
+            key=lambda doc: doc_order.get(id(doc.page_content), 999),
+        )
+
+        ctx.timings["tag_boost"] = time.monotonic() - t0
+
+        logger.info(
+            f"[User {ctx.tg_id}] Tag boost applied with factor={self.boost_factor}"
+        )
+
+
 class RerankStep(PipelineStep):
     """Re-rank documents using LLM scoring."""
     name = "rerank"
@@ -326,6 +447,7 @@ class BuildContextStep(PipelineStep):
         from crag.simple_rag import documents_to_context_str
 
         docs = ctx.reranked_docs or ctx.graded_docs or ctx.retrieved_docs
+        docs = apply_entity_grounding_guardrails(ctx.rewritten_question, docs)
         ctx.context_str = documents_to_context_str(docs)
 
 
@@ -371,6 +493,58 @@ class GenerateStep(PipelineStep):
 
         ctx.answer_json = accumulated
         ctx.timings["generate"] = time.monotonic() - t0
+
+
+class AssertionCheckStep(PipelineStep):
+    """Validate answer assertions against source categories.
+
+    Prevents cross-entity hallucinations by checking that answer claims
+    are grounded in sources from appropriate categories.
+    """
+    name = "assertion_check"
+
+    async def execute(self, ctx: PipelineContext, rag: Any) -> None:
+        from crag.assertion_validator import validate_answer_assertions, add_assertion_disclaimer
+
+        # Only validate if we have both answer and sources
+        if not ctx.answer_json or not ctx.reranked_docs:
+            return
+
+        # Extract answer text from JSON (may contain {"answer": "...", "suggested_questions": [...]})
+        try:
+            answer_data = json.loads(ctx.answer_json)
+            answer_text = answer_data.get("answer", ctx.answer_json)
+        except json.JSONDecodeError:
+            answer_text = ctx.answer_json
+
+        # Skip if answer is too short (likely error message)
+        if len(answer_text) < 50:
+            return
+
+        t0 = time.monotonic()
+        result = await validate_answer_assertions(
+            answer_text,
+            ctx.reranked_docs,
+            ctx.rewritten_question or ctx.question,
+            llm_provider=None,  # Can pass rag.llm for advanced validation
+        )
+        ctx.timings["assertion_check"] = time.monotonic() - t0
+
+        # If validation failed, add disclaimer
+        if not result.is_valid and result.warnings:
+            logger.warning(
+                f"[User {ctx.tg_id}] Assertion check failed: {'; '.join(result.warnings)}"
+            )
+
+            # Add disclaimer to answer
+            answer_with_disclaimer = add_assertion_disclaimer(answer_text, result.warnings)
+
+            # Update answer in JSON
+            if answer_data and isinstance(answer_data, dict):
+                answer_data["answer"] = answer_with_disclaimer
+                ctx.answer_json = json.dumps(answer_data, ensure_ascii=False)
+            else:
+                ctx.answer_json = answer_with_disclaimer
 
 
 class CacheStoreStep(PipelineStep):
@@ -473,6 +647,7 @@ def create_default_pipeline(
             top_k=top_k,
         ),
         GradeStep(),
+        TagBoostStep(boost_factor=0.3),  # Apply tag-based boosting
     ])
 
     if use_reranking:
@@ -481,6 +656,7 @@ def create_default_pipeline(
     steps.extend([
         BuildContextStep(),
         GenerateStep(stream_callback=stream_callback),
+        AssertionCheckStep(),
         CacheStoreStep(),
     ])
 
@@ -500,8 +676,10 @@ def create_fast_pipeline(
         CacheStep(),
         RetrieveStep(use_hyde=False, use_decomposition=False, top_k=4),
         GradeStep(),
+        TagBoostStep(boost_factor=0.2),  # Lighter boost for fast pipeline
         BuildContextStep(),
         GenerateStep(stream_callback=stream_callback),
+        AssertionCheckStep(),
         CacheStoreStep(),
     ])
 
@@ -520,8 +698,10 @@ def create_research_pipeline(
         ToolExecuteStep(),
         RetrieveStep(use_hyde=True, use_decomposition=True, top_k=10),
         GradeStep(),
+        TagBoostStep(boost_factor=0.4),  # Stronger boost for research pipeline
         RerankStep(top_k=8),
         BuildContextStep(),
         GenerateStep(stream_callback=stream_callback),
+        AssertionCheckStep(),
         CacheStoreStep(),
     ])

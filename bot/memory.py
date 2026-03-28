@@ -313,6 +313,50 @@ def _detect_mood(question: str) -> str:
     return "calm"
 
 
+def _extract_fact_updates(question: str) -> dict[str, str]:
+    """Extract explicit user-confirmed facts from the user message.
+
+    Returns a sparse map, e.g. {"zulassungsbescheid": "done"|"not_done"}.
+    """
+    text = (question or "").lower()
+    updates: dict[str, str] = {}
+
+    if "zulassungsbescheid" in text:
+        not_done_markers = [
+            "не получил",
+            "не получал",
+            "не получала",
+            "еще не получил",
+            "ещё не получил",
+            "еще не получал",
+            "ещё не получал",
+            "еще не получала",
+            "ещё не получала",
+            "пока не получил",
+            "пока не получал",
+            "пока не получала",
+            "нет zulassungsbescheid",
+            "zulassungsbescheid нет",
+            "не получен",
+        ]
+        done_markers = [
+            "получил",
+            "получила",
+            "получен",
+            "уже есть",
+            "есть zulassungsbescheid",
+            "имею zulassungsbescheid",
+            "на руках zulassungsbescheid",
+        ]
+
+        if any(m in text for m in not_done_markers):
+            updates["zulassungsbescheid"] = "not_done"
+        elif any(m in text for m in done_markers):
+            updates["zulassungsbescheid"] = "done"
+
+    return updates
+
+
 def _truncate_summary(summary: str, max_words: int = 250) -> str:
     """Keep summary under max_words by trimming oldest sentences."""
     words = summary.split()
@@ -340,9 +384,9 @@ async def update_journey_and_summary(
             current_state = memory["journey_state"] or DEFAULT_JOURNEY_STATE.copy()
             current_summary = memory["conversation_summary"] or "Начало общения."
 
-            # 1. Detect discussed stages from question + response
-            combined_text = f"{question} {response}"
-            newly_discussed = _detect_stages(combined_text)
+            # 1. Detect discussed stages from USER message only.
+            # This prevents "self-confirmation" where bot output mutates memory.
+            newly_discussed = _detect_stages(question)
 
             new_state = dict(current_state)
             for stage_id in newly_discussed:
@@ -353,11 +397,18 @@ async def update_journey_and_summary(
                 if current_state.get(stage) == "discussed":
                     new_state[stage] = "discussed"
 
-            # 2. Detect mood
+            # 2. Update explicit user-confirmed facts
+            fact_updates = _extract_fact_updates(question)
+            if fact_updates:
+                current_facts = dict(current_state.get("_facts") or {})
+                current_facts.update(fact_updates)
+                new_state["_facts"] = current_facts
+
+            # 3. Detect mood
             user_mood = _detect_mood(question)
             new_state["_user_mood"] = user_mood
 
-            # 3. Append to summary + periodic LLM compression
+            # 4. Append to summary + periodic LLM compression
             q_snippet = question[:150].strip()
             r_snippet = response[:200].strip()
             new_entry = f"В: {q_snippet} | О: {r_snippet}"
@@ -518,6 +569,16 @@ def build_memory_context(
         if pending:
             parts.append("Ещё не обсуждали:\n" + "\n".join(pending))
 
+        facts = journey_state.get("_facts") or {}
+        fact_lines = []
+        z_status = facts.get("zulassungsbescheid")
+        if z_status == "done":
+            fact_lines.append("✅ Zulassungsbescheid: подтверждено пользователем как получено")
+        elif z_status == "not_done":
+            fact_lines.append("⬜ Zulassungsbescheid: пользователь явно сказал, что еще не получен")
+        if fact_lines:
+            parts.append("Подтвержденные факты пользователя:\n" + "\n".join(fact_lines))
+
     # Skipped step warnings
     warnings = _get_skipped_step_warnings(journey_state)
     if warnings:
@@ -564,4 +625,3 @@ def get_fallback_buttons(journey_state: Optional[dict]) -> list:
         ]
 
     return pending[:3]
-

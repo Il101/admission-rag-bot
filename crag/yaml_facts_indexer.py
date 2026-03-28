@@ -13,6 +13,31 @@ from typing import Generator
 logger = logging.getLogger(__name__)
 
 
+def infer_entity_type_for_yaml_chunk(metadata: dict) -> str:
+    """Infer high-level entity type for YAML fact chunks."""
+    fact_type = str(metadata.get("fact_type", "")).strip().lower()
+    topic = str(metadata.get("topic", "")).strip().lower()
+    source = str(metadata.get("source", "")).strip().lower()
+
+    if fact_type in {"deadline", "requirement", "language_requirement", "quota", "key_dates"}:
+        return "admission"
+    if fact_type in {"tuition", "tuition_tariff", "tuition_exemption"}:
+        return "finance"
+    if fact_type in {"vwu_location", "gotcha", "certificate"} or "language" in topic:
+        return "language"
+    if fact_type in {"contact", "general_info"} and "universities/" in source:
+        return "university"
+    return "general"
+
+
+def _annotate_entity_type(chunks: list[dict]) -> list[dict]:
+    for chunk in chunks:
+        metadata = chunk.get("metadata", {})
+        if "entity_type" not in metadata:
+            metadata["entity_type"] = infer_entity_type_for_yaml_chunk(metadata)
+    return chunks
+
+
 def _flatten_dict(d: dict, parent_key: str = '', sep: str = '.') -> dict:
     """Flatten a nested dictionary with dot notation keys."""
     items = []
@@ -687,5 +712,6 @@ def index_all_yaml_facts(facts_dir: str = "facts") -> list[dict]:
             except Exception as e:
                 logger.error(f"Error parsing {yaml_file}: {e}")
 
+    _annotate_entity_type(all_chunks)
     logger.info(f"Total YAML fact chunks: {len(all_chunks)}")
     return all_chunks

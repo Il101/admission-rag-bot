@@ -46,3 +46,18 @@ def test_deadline_table_renders_as_cards():
     assert "📍 Universität Innsbruck (UIBK)" in out
     assert "• Winter 2026/27: 1 апреля — 15 мая 2026" in out
     assert "• Summer 2027: 1 сентября — 15 октября 2026" in out
+
+
+def test_confirmed_fact_guardrail_rewrites_unconfirmed_claim():
+    text = "✅ Что уже готово? Вы уже получили Zulassungsbescheid и можно двигаться дальше."
+    memory = {"journey_state": {"_facts": {"zulassungsbescheid": "not_done"}}}
+    out = rag_handlers._apply_confirmed_fact_guardrails(text, memory)
+    assert "Вы уже получили Zulassungsbescheid" not in out
+    assert "получение Zulassungsbescheid — обязательный шаг" in out
+
+
+def test_confirmed_fact_guardrail_keeps_confirmed_claim():
+    text = "Вы уже получили Zulassungsbescheid."
+    memory = {"journey_state": {"_facts": {"zulassungsbescheid": "done"}}}
+    out = rag_handlers._apply_confirmed_fact_guardrails(text, memory)
+    assert out == text

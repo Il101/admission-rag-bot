@@ -17,6 +17,59 @@ from .query_router import classify_query, QueryType, get_search_weights
 
 logger = logging.getLogger(__name__)
 
+# ── Entity/topic focus detection for strict retrieval filtering ──────────────
+
+_HOUSING_QUERY_KEYWORDS = (
+    "жиль", "общежит", "studentenheim", "wg ", "квартир", "аренд",
+    "wohnung", "miet", "meldezettel",
+)
+_FOOD_QUERY_KEYWORDS = (
+    "питан", "еда", "столов", "mensa", "кафе", "ресторан", "перекус",
+    "vegan", "vegetarian", "веган", "вегетари", "canteen", "cafeteria",
+    "meal", "меню",
+)
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    lowered = (text or "").lower()
+    return any(kw in lowered for kw in keywords)
+
+
+def detect_entity_focus(query: str) -> str | None:
+    """Detect dominant entity focus from user query.
+
+    Priority:
+    1. housing
+    2. food
+    """
+    if _contains_any(query, _HOUSING_QUERY_KEYWORDS):
+        return "housing"
+    if _contains_any(query, _FOOD_QUERY_KEYWORDS):
+        return "food"
+    return None
+
+
+def build_entity_topic_boost_sql(entity_focus: str | None) -> str:
+    """Build soft SQL boost for entity/topic focused retrieval.
+
+    Returns a score component where lower is better (negative boost for matches).
+    """
+    if entity_focus == "housing":
+        return (
+            "CASE WHEN (metadata->>'entity_type' = 'housing' "
+            "OR metadata->>'topic' = 'housing') "
+            "THEN -0.18 ELSE 0 END"
+        )
+
+    if entity_focus == "food":
+        return (
+            "CASE WHEN (metadata->>'entity_type' = 'food' "
+            "OR metadata->>'topic' IN ('student-budget', 'food')) "
+            "THEN -0.15 ELSE 0 END"
+        )
+
+    return "0"
+
 # ── Embedding cache (LRU, thread-safe via asyncio single-thread) ────────
 
 _EMBEDDING_CACHE_MAX = 256
@@ -578,6 +631,11 @@ class SimpleRAG:
             where_clause, filter_params = self._build_filter_sql(user_filters)
             level_boost_expr, level_params = self._build_level_boost_expr(user_filters)
 
+        entity_focus = detect_entity_focus(query)
+        entity_boost = build_entity_topic_boost_sql(entity_focus)
+        if entity_focus:
+            logger.info("Applied soft entity/topic boost: %s", entity_focus)
+
         # Build base scoring
         vector_score = "(embedding <=> CAST(:embedding AS vector))"
         fts_score = (
@@ -603,7 +661,7 @@ class SimpleRAG:
             f"THEN -{facts_weight * 0.3} ELSE -{narratives_weight * 0.3} END"
         )
 
-        final_score = f"({hybrid_score} + {fact_boost})"
+        final_score = f"({hybrid_score} + {fact_boost} + {entity_boost})"
 
         if level_boost_expr:
             order_by = f"ORDER BY {level_boost_expr} ASC, {final_score}"

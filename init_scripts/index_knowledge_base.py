@@ -21,6 +21,30 @@ logger = logging.getLogger(__name__)
 from crag.yaml_facts_indexer import index_all_yaml_facts
 
 
+def infer_entity_type_from_metadata(file_metadata: dict) -> str:
+    """Infer high-level entity type for stricter retrieval filtering."""
+    topic = str(file_metadata.get("topic", "")).strip().lower()
+    source = str(file_metadata.get("source", "")).strip().lower()
+
+    if topic == "housing":
+        return "housing"
+    if topic in {"student-budget", "nutrition", "food"}:
+        return "food"
+    if topic in {"visa-d", "residence-permit"}:
+        return "visa"
+    if topic in {"tuition-fees", "scholarships"}:
+        return "finance"
+    if topic in {"german-language", "german-requirements", "german-courses", "english-programs"}:
+        return "language"
+    if topic in {"university-application", "admission"}:
+        return "admission"
+    if "/housing" in source or source.endswith("housing.md"):
+        return "housing"
+    if "student-budget" in source:
+        return "food"
+    return "general"
+
+
 # ── YAML Frontmatter Parsing ──────────────────────────────────────────────
 
 def parse_frontmatter(content: str) -> tuple[dict, str]:
@@ -32,12 +56,14 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     if not content.startswith("---"):
         return {}, content
 
-    end = content.find("---", 3)
-    if end == -1:
+    # Match frontmatter delimiters only when they appear on their own lines.
+    # This avoids false positives for URLs containing "---" in frontmatter values.
+    match = re.match(r"^---\n(.*?)\n---\n?(.*)$", content, re.DOTALL)
+    if not match:
         return {}, content
 
-    frontmatter_str = content[3:end].strip()
-    body = content[end + 3:].strip()
+    frontmatter_str = match.group(1).strip()
+    body = match.group(2).strip()
 
     try:
         metadata = yaml.safe_load(frontmatter_str)
@@ -190,6 +216,8 @@ def split_markdown(body: str, file_metadata: dict, max_chunk_len: int = 800) -> 
         for key in ("university", "topic", "country_scope", "level", "city", "related_docs"):
             if key in file_metadata:
                 chunk_meta[key] = file_metadata[key]
+
+        chunk_meta["entity_type"] = infer_entity_type_from_metadata(file_metadata)
         
         # If section is small enough, emit as a single chunk
         if len(section_text) <= max_chunk_len:
@@ -323,6 +351,13 @@ async def index():
     force_reindex = os.getenv("FORCE_REINDEX", "").strip().lower() in {"1", "true", "yes", "on"}
     if force_reindex:
         logger.info("⚠️ FORCE_REINDEX is enabled — full KB re-index will run.")
+
+    # Check if parent-child chunking is enabled
+    use_parent_child = os.getenv("USE_PARENT_CHILD_CHUNKING", "false").strip().lower() in {"1", "true", "yes", "on"}
+    if use_parent_child:
+        logger.info("✅ Parent-child chunking is ENABLED (retrieval on children, context from parents)")
+    else:
+        logger.info("📝 Using standard flat chunking")
 
     # Initialize LLM provider to get embedding dimensions
     logger.info("Detecting embedding provider configuration...")
@@ -569,6 +604,26 @@ async def index():
     if not all_chunks:
         logger.warning("No documents found in knowledge_base/!")
         return
+
+    # Apply parent-child chunking if enabled
+    if use_parent_child:
+        from crag.parent_child_chunking import create_parent_child_chunks, chunks_to_db_format
+
+        logger.info("Converting chunks to parent-child pairs...")
+        chunk_pairs = []
+        for chunk in all_chunks:
+            pairs = create_parent_child_chunks(chunk["content"], chunk["metadata"])
+            chunk_pairs.extend(pairs)
+
+        all_chunks = chunks_to_db_format(chunk_pairs)
+        logger.info(f"Created parent-child chunks: {len(all_chunks)} total entries (parents + children)")
+
+    # Add domain tags to all chunks
+    from crag.tag_set_layer import add_tags_to_metadata
+
+    logger.info("Adding domain tags to chunks...")
+    for chunk in all_chunks:
+        chunk["metadata"] = add_tags_to_metadata(chunk["metadata"], chunk["content"])
 
     logger.info(f"Loaded {len(all_chunks)} chunks total. Generating embeddings with {llm_provider.config.embedding_provider}...")
 

@@ -173,6 +173,29 @@ def _postprocess_answer_text(text: str) -> str:
     return text
 
 
+def _apply_confirmed_fact_guardrails(text: str, memory: dict | None) -> str:
+    """Downgrade unconfirmed 'already done' claims to neutral wording."""
+    if not text:
+        return text
+    state = (memory or {}).get("journey_state") or {}
+    facts = state.get("_facts") or {}
+    z_status = facts.get("zulassungsbescheid")
+
+    # If not explicitly confirmed as done, never assert completion.
+    if z_status != "done":
+        text = re.sub(
+            r"(?i)\bвы уже получили\s+zulassungsbescheid\b",
+            "получение Zulassungsbescheid — обязательный шаг",
+            text,
+        )
+        text = re.sub(
+            r"(?i)\bу вас уже есть\s+zulassungsbescheid\b",
+            "нужно получить Zulassungsbescheid",
+            text,
+        )
+    return text
+
+
 def _emit_observability_metrics(
     *,
     user_id: int,
@@ -605,6 +628,7 @@ async def _handle_question_core(
         if cached_response and not tool_result:  # Skip cache if tool was used
             clean_text, suggested = parse_suggested_buttons(cached_response)
             clean_text = _postprocess_answer_text(clean_text)
+            clean_text = _apply_confirmed_fact_guardrails(clean_text, memory)
             safe_text = sanitize_telegram_html(clean_text)
             keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
             response_delivered = await _safe_edit_message(
@@ -706,6 +730,7 @@ async def _handle_question_core(
 
         clean_text, suggested = parse_suggested_buttons(full_response)
         clean_text = _postprocess_answer_text(clean_text)
+        clean_text = _apply_confirmed_fact_guardrails(clean_text, memory)
 
         sources_text = docs_to_sources_str(docs)
         if sources_text:
@@ -878,6 +903,7 @@ async def _handle_question_core_v2(
         )
         clean_text, suggested = parse_suggested_buttons(full_response)
         clean_text = _postprocess_answer_text(clean_text)
+        clean_text = _apply_confirmed_fact_guardrails(clean_text, memory)
 
         sources_text = docs_to_sources_str(docs) if docs else ""
         if sources_text:
