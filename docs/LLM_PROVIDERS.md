@@ -94,9 +94,9 @@ railway variables set GOOGLE_API_KEY=your-google-key
 
 ### Локально:
 
-Скопируй `.env.example` в `.env` и измени:
+Скопируй `example.env` в `.env` и измени:
 ```bash
-cp .env.example .env
+cp example.env .env
 nano .env  # или vim, code, etc.
 ```
 

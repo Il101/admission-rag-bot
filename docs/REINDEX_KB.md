@@ -44,13 +44,17 @@ After successful re-index, disable it to avoid unnecessary work on every deploy:
 railway variable delete FORCE_REINDEX
 ```
 
-The init script runs automatically on every deployment via `nixpacks.toml`:
-```toml
-[phases.setup]
-nixPkgs = ["python310"]
+The init script runs automatically on every deployment via container start command:
+```bash
+sh init_scripts/entry.sh
+```
 
-[start]
-cmd = "python init_scripts/index_knowledge_base.py && python -m bot.main"
+Actual startup sequence in `init_scripts/entry.sh`:
+```bash
+python3 init_scripts/init_bot_db.py
+python3 -m bot.migrate
+python3 init_scripts/index_knowledge_base.py
+python3 bot/app.py
 ```
 
 ### Method 2: Run Script Manually via Railway Shell

@@ -108,6 +108,11 @@ class CacheStep(PipelineStep):
     name = "cache"
 
     async def execute(self, ctx: PipelineContext, rag: Any) -> None:
+        # If a tool call is required, skip semantic cache to avoid
+        # returning a stale answer that doesn't include tool output.
+        if ctx.tool_needed:
+            return
+
         t0 = time.monotonic()
         cached = await rag.get_cached_answer(ctx.rewritten_question)
         ctx.timings["cache_check"] = time.monotonic() - t0
@@ -158,10 +163,12 @@ class RetrieveStep(PipelineStep):
         self,
         use_hyde: bool = True,
         use_decomposition: bool = False,
+        use_smart_retrieval: bool = True,
         top_k: int = 6,
     ):
         self.use_hyde = use_hyde
         self.use_decomposition = use_decomposition
+        self.use_smart_retrieval = use_smart_retrieval
         self.top_k = top_k
 
     async def execute(self, ctx: PipelineContext, rag: Any) -> None:
@@ -171,6 +178,14 @@ class RetrieveStep(PipelineStep):
 
         if self.use_decomposition:
             ctx.retrieved_docs = await rag.aretrieve_decomposed(
+                ctx.rewritten_question,
+                top_k=self.top_k,
+                user_filters=user_filters,
+                use_hyde=self.use_hyde,
+                memory_context=ctx.memory_context,
+            )
+        elif self.use_smart_retrieval:
+            ctx.retrieved_docs = await rag.aretrieve_smart(
                 ctx.rewritten_question,
                 top_k=self.top_k,
                 user_filters=user_filters,
@@ -390,9 +405,11 @@ def create_default_pipeline(
     stream_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     use_hyde: bool = True,
     use_decomposition: bool = False,
+    use_smart_retrieval: bool = True,
     use_reranking: bool = True,
     use_tools: bool = True,
-    top_k: int = 6,
+    top_k: int = 10,
+    rerank_top_k: int = 6,
 ) -> Pipeline:
     """Create the default RAG pipeline.
 
@@ -400,35 +417,40 @@ def create_default_pipeline(
         stream_callback: Async callback for streaming output
         use_hyde: Enable HyDE for retrieval
         use_decomposition: Enable query decomposition
+        use_smart_retrieval: Enable FACT/NARRATIVE smart retrieval routing
         use_reranking: Enable LLM re-ranking
         use_tools: Enable tool/function calling
-        top_k: Number of documents to retrieve
+        top_k: Number of documents to retrieve before grading/reranking
+        rerank_top_k: Number of documents to keep after re-ranking
 
     Returns:
         Configured Pipeline instance
     """
-    steps = [
-        RewriteStep(),
-        CacheStep(),
-    ]
-
     if use_tools:
-        steps.extend([
+        steps = [
+            RewriteStep(),
             ToolCheckStep(),
             ToolExecuteStep(),
-        ])
+            CacheStep(),
+        ]
+    else:
+        steps = [
+            RewriteStep(),
+            CacheStep(),
+        ]
 
     steps.extend([
         RetrieveStep(
             use_hyde=use_hyde,
             use_decomposition=use_decomposition,
+            use_smart_retrieval=use_smart_retrieval,
             top_k=top_k,
         ),
         GradeStep(),
     ])
 
     if use_reranking:
-        steps.append(RerankStep(top_k=top_k))
+        steps.append(RerankStep(top_k=rerank_top_k))
 
     steps.extend([
         BuildContextStep(),

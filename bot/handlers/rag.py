@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 import re
 
@@ -18,13 +19,58 @@ from bot.memory import (
     get_current_date,
     update_journey_and_summary,
 )
+from crag.observability import (
+    is_observability_enabled,
+    log_pipeline_metrics,
+    trace_full_pipeline,
+)
 from crag.simple_rag import documents_to_context_str
+from crag.pipeline import PipelineContext, create_default_pipeline
 
 logger = logging.getLogger(__name__)
 
 # Streaming config
 STREAM_EDIT_INTERVAL = 1.2  # seconds between edits
 STREAM_MIN_CHARS = 80       # min new chars before edit
+
+
+def _use_new_pipeline_enabled() -> bool:
+    """Feature flag for gradual migration to crag.pipeline orchestrator."""
+    return os.getenv("USE_NEW_PIPELINE", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _use_pipeline_shadow_enabled() -> bool:
+    """Enable background shadow run of pipeline v2 while serving legacy path."""
+    return os.getenv("USE_NEW_PIPELINE_SHADOW", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _emit_observability_metrics(
+    *,
+    user_id: int,
+    question: str,
+    timings: dict,
+    docs_retrieved: int,
+    docs_graded: int,
+    cache_hit: bool,
+    error: str | None = None,
+):
+    """Emit pipeline metrics to observability backend asynchronously."""
+    if not is_observability_enabled():
+        return
+    asyncio.create_task(asyncio.to_thread(
+        log_pipeline_metrics,
+        user_id=user_id,
+        question=question,
+        timings=timings,
+        docs_retrieved=docs_retrieved,
+        docs_graded=docs_graded,
+        cache_hit=cache_hit,
+        error=error,
+    ))
 
 # Country → country_scope code mapping (module-level constant for easy extension)
 COUNTRY_TO_SCOPE: dict[str, str] = {
@@ -434,6 +480,14 @@ async def _handle_question_core(
                 )
             timings["total"] = time.monotonic() - pipeline_start
             logger.info("[User %s] Cache hit | %s", tg_id, _fmt_timings(timings))
+            _emit_observability_metrics(
+                user_id=tg_id,
+                question=question,
+                timings=timings,
+                docs_retrieved=0,
+                docs_graded=0,
+                cache_hit=True,
+            )
             if db_session_factory:
                 asyncio.create_task(add_pipeline_log(
                     db_session_factory, tg_id, question, actual_question,
@@ -486,6 +540,14 @@ async def _handle_question_core(
             await add_chat_messages(db_session, tg_id, question, clean_text)
             timings["total"] = time.monotonic() - pipeline_start
             logger.info("[User %s] No relevant docs | %s", tg_id, _fmt_timings(timings))
+            _emit_observability_metrics(
+                user_id=tg_id,
+                question=question,
+                timings=timings,
+                docs_retrieved=retrieved_count,
+                docs_graded=0,
+                cache_hit=False,
+            )
             if db_session_factory:
                 asyncio.create_task(add_pipeline_log(
                     db_session_factory, tg_id, question, actual_question,
@@ -544,6 +606,14 @@ async def _handle_question_core(
             "[User %s] Pipeline complete (%d docs) | %s",
             tg_id, len(docs), _fmt_timings(timings),
         )
+        _emit_observability_metrics(
+            user_id=tg_id,
+            question=question,
+            timings=timings,
+            docs_retrieved=retrieved_count,
+            docs_graded=len(docs),
+            cache_hit=False,
+        )
         if db_session_factory:
             asyncio.create_task(add_pipeline_log(
                 db_session_factory, tg_id, question, actual_question,
@@ -555,6 +625,15 @@ async def _handle_question_core(
         timings["total"] = time.monotonic() - pipeline_start
         err_str = f"{type(exc).__name__}: {exc}"
         logger.exception("[User %s] Pipeline error: %s", tg_id, err_str)
+        _emit_observability_metrics(
+            user_id=tg_id,
+            question=question,
+            timings=timings,
+            docs_retrieved=retrieved_count,
+            docs_graded=0,
+            cache_hit=False,
+            error=err_str,
+        )
         if db_session_factory:
             asyncio.create_task(add_pipeline_log(
                 db_session_factory, tg_id, question, actual_question,
@@ -566,6 +645,239 @@ async def _handle_question_core(
         if response_delivered:
             return
         raise
+
+
+async def _handle_question_core_v2(
+    context,
+    simple_rag,
+    db_session,
+    chat_id: int,
+    reply_to_id: int,
+    tg_id: int,
+    question: str,
+    onboarding_data: dict,
+    db_session_factory=None,
+    use_hyde: bool = True,
+    use_tools: bool = True,
+    use_reranking: bool = True,
+):
+    """Pipeline-based core path (feature-flagged).
+
+    Keeps Telegram UX/side-effects identical while delegating orchestration
+    to `crag.pipeline`.
+    """
+    pipeline_start = time.monotonic()
+    timings = {}
+    response_delivered = False
+    actual_question = question
+    retrieved_count = 0
+    doc_sources: list = []
+
+    onboarding_data = await _ensure_onboarding_loaded(context, db_session, tg_id)
+    memory, chat_history_str, memory_context_str = await _load_memory(
+        db_session, tg_id, onboarding_data
+    )
+
+    msg = await context.bot.send_message(
+        chat_id=chat_id,
+        reply_to_message_id=reply_to_id,
+        text="🔍 Ищу информацию...",
+    )
+
+    async def _stream_cb(accumulated: str):
+        answer_regex = re.compile(r'"answer":\s*"((?:[^"\\]|\\.)*)', re.DOTALL)
+        match = answer_regex.search(accumulated)
+        if not match:
+            return
+        display_text = match.group(1)
+        display_text = display_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+        safe = sanitize_telegram_html(display_text + " ▌")
+        if safe.strip():
+            await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
+
+    try:
+        pipeline = create_default_pipeline(
+            stream_callback=_stream_cb,
+            use_hyde=use_hyde,
+            use_decomposition=False,
+            use_smart_retrieval=True,
+            use_reranking=use_reranking,
+            use_tools=use_tools,
+            top_k=10,
+            rerank_top_k=6,
+        )
+
+        ctx = PipelineContext(
+            question=question,
+            tg_id=tg_id,
+            onboarding_data=onboarding_data,
+            memory_context=memory_context_str,
+            chat_history=chat_history_str,
+            journey_state=memory.get("journey_state") or {},
+            conversation_summary=memory.get("conversation_summary") or "",
+        )
+
+        ctx = await pipeline.run(ctx, simple_rag)
+        timings = dict(ctx.timings or {})
+        actual_question = ctx.rewritten_question or question
+        docs = ctx.reranked_docs or ctx.graded_docs or ctx.retrieved_docs or []
+        retrieved_count = len(ctx.retrieved_docs or [])
+        doc_sources = [
+            doc.metadata.get("source_url", "")
+            for doc in docs
+            if getattr(doc, "metadata", None) and doc.metadata.get("source_url")
+        ]
+
+        full_response = ctx.answer_json or json.dumps(
+            {
+                "answer": "К сожалению, не удалось сформировать ответ.",
+                "suggested_questions": [],
+            },
+            ensure_ascii=False,
+        )
+        clean_text, suggested = parse_suggested_buttons(full_response)
+
+        sources_text = docs_to_sources_str(docs) if docs else ""
+        if sources_text:
+            clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
+
+        safe_text = sanitize_telegram_html(clean_text)
+        keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
+        response_delivered = await _safe_edit_message(
+            msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard
+        )
+
+        if suggested:
+            _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
+        _store_qa(context, msg.message_id, question, clean_text)
+        await add_chat_messages(db_session, tg_id, question, clean_text)
+        if db_session_factory:
+            asyncio.create_task(
+                update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
+            )
+        if not ctx.cache_hit:
+            asyncio.create_task(simple_rag.cache_answer(actual_question, full_response))
+
+        timings["total"] = time.monotonic() - pipeline_start
+        logger.info(
+            "[User %s] Pipeline v2 complete (%d docs) | %s",
+            tg_id, len(docs), _fmt_timings(timings),
+        )
+        _emit_observability_metrics(
+            user_id=tg_id,
+            question=question,
+            timings=timings,
+            docs_retrieved=retrieved_count,
+            docs_graded=len(ctx.graded_docs or []),
+            cache_hit=bool(ctx.cache_hit),
+        )
+        if db_session_factory:
+            asyncio.create_task(add_pipeline_log(
+                db_session_factory, tg_id, question, actual_question,
+                cache_hit=bool(ctx.cache_hit),
+                docs_retrieved=retrieved_count,
+                docs_after_grading=len(ctx.graded_docs or []),
+                timings=timings, sources=doc_sources,
+            ))
+
+    except Exception as exc:
+        timings["total"] = time.monotonic() - pipeline_start
+        err_str = f"{type(exc).__name__}: {exc}"
+        logger.exception("[User %s] Pipeline v2 error: %s", tg_id, err_str)
+        _emit_observability_metrics(
+            user_id=tg_id,
+            question=question,
+            timings=timings,
+            docs_retrieved=retrieved_count,
+            docs_graded=0,
+            cache_hit=False,
+            error=err_str,
+        )
+        if db_session_factory:
+            asyncio.create_task(add_pipeline_log(
+                db_session_factory, tg_id, question, actual_question,
+                cache_hit=False, docs_retrieved=retrieved_count, docs_after_grading=0,
+                timings=timings, sources=doc_sources, error=err_str,
+            ))
+        if response_delivered:
+            return
+        raise
+
+
+async def _run_pipeline_v2_shadow(
+    simple_rag,
+    tg_id: int,
+    question: str,
+    onboarding_data: dict,
+    db_session_factory,
+    use_hyde: bool = True,
+    use_tools: bool = True,
+    use_reranking: bool = True,
+):
+    """Run pipeline v2 in background without affecting user-visible behavior."""
+    if not db_session_factory:
+        return
+
+    start = time.monotonic()
+    try:
+        async with db_session_factory() as session:
+            memory = await get_user_memory(session, tg_id)
+            history_list = await get_context_messages(session, tg_id)
+
+        chat_history_str = _build_chat_history_str(history_list)
+        memory_context_str = build_memory_context(
+            memory.get("journey_state"),
+            memory.get("conversation_summary"),
+            onboarding_data,
+        )
+
+        pipeline = create_default_pipeline(
+            stream_callback=None,
+            use_hyde=use_hyde,
+            use_decomposition=False,
+            use_smart_retrieval=True,
+            use_reranking=use_reranking,
+            use_tools=use_tools,
+            top_k=10,
+            rerank_top_k=6,
+        )
+        ctx = PipelineContext(
+            question=question,
+            tg_id=tg_id,
+            onboarding_data=onboarding_data or {},
+            memory_context=memory_context_str,
+            chat_history=chat_history_str,
+            journey_state=memory.get("journey_state") or {},
+            conversation_summary=memory.get("conversation_summary") or "",
+        )
+        ctx = await pipeline.run(ctx, simple_rag)
+        elapsed = time.monotonic() - start
+        logger.info(
+            "[User %s] Pipeline v2 shadow complete | total=%.2fs | cache=%s | docs=%d",
+            tg_id,
+            elapsed,
+            bool(ctx.cache_hit),
+            len(ctx.reranked_docs or ctx.graded_docs or ctx.retrieved_docs or []),
+        )
+    except Exception as exc:
+        logger.warning(
+            "[User %s] Pipeline v2 shadow failed: %s: %s",
+            tg_id,
+            type(exc).__name__,
+            exc,
+        )
+
+
+async def _handle_question_with_optional_trace(handler_coro, tg_id: int, question: str):
+    """Execute handler with optional observability trace context."""
+    if is_observability_enabled():
+        async with trace_full_pipeline(
+            user_id=tg_id,
+            question=question,
+            metadata={"path": "telegram_handler"},
+        ):
+            return await handler_coro
+    return await handler_coro
 
 
 @with_db_session()
@@ -587,17 +899,34 @@ async def answer(
         return
 
     try:
-        await _handle_question_core(
-            context=context,
-            simple_rag=simple_rag,
-            db_session=db_session,
-            chat_id=update.effective_chat.id,
-            reply_to_id=update.effective_message.id,
-            tg_id=update.effective_user.id,
+        use_new = _use_new_pipeline_enabled()
+        handler = _handle_question_core_v2 if use_new else _handle_question_core
+        user_id = update.effective_user.id
+        await _handle_question_with_optional_trace(
+            handler(
+                context=context,
+                simple_rag=simple_rag,
+                db_session=db_session,
+                chat_id=update.effective_chat.id,
+                reply_to_id=update.effective_message.id,
+                tg_id=user_id,
+                question=question,
+                onboarding_data=context.user_data.get("onboarding", {}),
+                db_session_factory=kwargs.get("db_session_factory"),
+            ),
+            tg_id=user_id,
             question=question,
-            onboarding_data=context.user_data.get("onboarding", {}),
-            db_session_factory=kwargs.get("db_session_factory"),
         )
+        if not use_new and _use_pipeline_shadow_enabled():
+            asyncio.create_task(
+                _run_pipeline_v2_shadow(
+                    simple_rag=simple_rag,
+                    tg_id=user_id,
+                    question=question,
+                    onboarding_data=dict(context.user_data.get("onboarding", {})),
+                    db_session_factory=kwargs.get("db_session_factory"),
+                )
+            )
     except Exception:
         logger.exception("Error in answer handler")
         await context.bot.send_message(
@@ -626,17 +955,34 @@ async def answer_to_replied(
         return
 
     try:
-        await _handle_question_core(
-            context=context,
-            simple_rag=simple_rag,
-            db_session=db_session,
-            chat_id=update.effective_chat.id,
-            reply_to_id=update.effective_message.reply_to_message.id,
-            tg_id=update.effective_user.id,
+        use_new = _use_new_pipeline_enabled()
+        handler = _handle_question_core_v2 if use_new else _handle_question_core
+        user_id = update.effective_user.id
+        await _handle_question_with_optional_trace(
+            handler(
+                context=context,
+                simple_rag=simple_rag,
+                db_session=db_session,
+                chat_id=update.effective_chat.id,
+                reply_to_id=update.effective_message.reply_to_message.id,
+                tg_id=user_id,
+                question=question,
+                onboarding_data=context.user_data.get("onboarding", {}),
+                db_session_factory=kwargs.get("db_session_factory"),
+            ),
+            tg_id=user_id,
             question=question,
-            onboarding_data=context.user_data.get("onboarding", {}),
-            db_session_factory=kwargs.get("db_session_factory"),
         )
+        if not use_new and _use_pipeline_shadow_enabled():
+            asyncio.create_task(
+                _run_pipeline_v2_shadow(
+                    simple_rag=simple_rag,
+                    tg_id=user_id,
+                    question=question,
+                    onboarding_data=dict(context.user_data.get("onboarding", {})),
+                    db_session_factory=kwargs.get("db_session_factory"),
+                )
+            )
     except Exception:
         logger.exception("Error in answer_to_replied handler")
         await context.bot.send_message(
