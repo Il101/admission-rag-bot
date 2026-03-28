@@ -33,6 +33,26 @@ logger = logging.getLogger(__name__)
 STREAM_EDIT_INTERVAL = 1.2  # seconds between edits
 STREAM_MIN_CHARS = 80       # min new chars before edit
 
+# Processing phases for user feedback
+PROCESSING_PHASES = {
+    "search": "🔍 Ищу информацию...",
+    "analyze": "🧠 Анализирую контекст...",
+    "generate": "✍️ Формирую ответ...",
+}
+
+
+async def _update_processing_phase(msg, phase: str) -> bool:
+    """Update the processing status message with current phase.
+
+    Returns True if update succeeded, False otherwise.
+    """
+    phase_text = PROCESSING_PHASES.get(phase, PROCESSING_PHASES["search"])
+    try:
+        await msg.edit_text(phase_text)
+        return True
+    except Exception:
+        return False
+
 
 def _use_new_pipeline_enabled() -> bool:
     """Feature flag for gradual migration to crag.pipeline orchestrator."""
@@ -616,6 +636,7 @@ async def _handle_question_core(
             return
 
         # 2. Retrieve candidates with HyDE and smart query routing
+        await _update_processing_phase(msg, "analyze")
         t0 = time.monotonic()
         user_filters = _build_user_filters(onboarding_data)
         docs = await simple_rag.aretrieve_smart(
@@ -658,41 +679,15 @@ async def _handle_question_core(
             if doc.metadata.get("source_url")
         ]
 
+        # Even with no docs, let LLM try to answer from system knowledge (date, greetings, etc.)
+        # LLM will decide if it can answer without context based on prompt rules
         if len(docs) == 0:
-            giveup_text = "К сожалению, я не смог найти релевантную информацию по этому запросу. 😔"
-            clean_text, suggested = parse_suggested_buttons(giveup_text)
-            safe_text = sanitize_telegram_html(clean_text)
-
-            keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
-            if suggested:
-                _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
-
-            response_delivered = await _safe_edit_message(
-                msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard
-            )
-            _store_qa(context, msg.message_id, question, clean_text)
-            await add_chat_messages(db_session, tg_id, question, clean_text)
-            timings["total"] = time.monotonic() - pipeline_start
-            logger.info("[User %s] No relevant docs | %s", tg_id, _fmt_timings(timings))
-            _emit_observability_metrics(
-                user_id=tg_id,
-                question=question,
-                timings=timings,
-                docs_retrieved=retrieved_count,
-                docs_graded=0,
-                cache_hit=False,
-            )
-            if db_session_factory:
-                asyncio.create_task(add_pipeline_log(
-                    db_session_factory, tg_id, question, actual_question,
-                    cache_hit=False, docs_retrieved=retrieved_count, docs_after_grading=0,
-                    timings=timings, sources=[],
-                ))
-            return
-
-        context_str = documents_to_context_str(docs)
+            context_str = "(Контекст из базы знаний пуст — попробуй ответить из системных знаний, если вопрос общий)"
+        else:
+            context_str = documents_to_context_str(docs)
 
         # 4. Stream answer (with tool result if available)
+        await _update_processing_phase(msg, "generate")
         t0 = time.monotonic()
         if tool_result:
             full_response = await _stream_answer_with_tools(
@@ -819,7 +814,15 @@ async def _handle_question_core_v2(
         text="🔍 Ищу информацию...",
     )
 
+    # Track if we've switched to "generate" phase
+    phase_switched = {"generate": False}
+
     async def _stream_cb(accumulated: str):
+        # Switch to "generate" phase on first content
+        if not phase_switched["generate"]:
+            phase_switched["generate"] = True
+            await _update_processing_phase(msg, "generate")
+
         answer_regex = re.compile(r'"answer":\s*"((?:[^"\\]|\\.)*)', re.DOTALL)
         match = answer_regex.search(accumulated)
         if not match:
@@ -831,6 +834,9 @@ async def _handle_question_core_v2(
             await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
 
     try:
+        # Update phase before pipeline starts processing
+        await _update_processing_phase(msg, "analyze")
+
         pipeline = create_default_pipeline(
             stream_callback=_stream_cb,
             use_hyde=use_hyde,

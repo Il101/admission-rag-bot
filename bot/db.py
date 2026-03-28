@@ -71,6 +71,10 @@ class User(Base):
     last_active: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Re-engagement tracking: when was the last follow-up sent (NULL = never)
+    reengagement_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
     messages: Mapped[List["Message"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
@@ -226,15 +230,16 @@ async def add_chat_messages(session: AsyncSession, tg_id: int, user_content: str
     user = await get_user(session, tg_id)
     if not user:
         await upsert_user(session, tg_id, {})
-        
+
     user_msg = Message(tg_id=tg_id, role="user", content=user_content)
     assistant_msg = Message(tg_id=tg_id, role="assistant", content=assistant_content)
     session.add_all([user_msg, assistant_msg])
-    
+
+    # Update last_active and reset re-engagement flag (user is active again)
     stmt = (
         update(User)
         .where(User.tg_id == tg_id)
-        .values(last_active=func.now())
+        .values(last_active=func.now(), reengagement_sent_at=None)
     )
     await session.execute(stmt)
     await session.commit()
@@ -563,3 +568,65 @@ async def add_ab_test_log(
         )
         session.add(log)
         await session.commit()
+
+
+# ── Re-engagement Functions ───────────────────────────────────────────────
+
+
+async def get_idle_users_for_reengagement(
+    session: AsyncSession,
+    idle_hours: int = 48,
+    limit: int = 50,
+) -> List[User]:
+    """Get users who have been idle for specified hours and haven't received a re-engagement yet.
+
+    Only returns users who:
+    1. Have been inactive for at least `idle_hours`
+    2. Have NOT received a re-engagement message (reengagement_sent_at is NULL)
+    3. Have at least some journey progress (not completely new users who abandoned onboarding)
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.now() - timedelta(hours=idle_hours)
+
+    stmt = (
+        select(User)
+        .where(
+            User.last_active < cutoff,
+            User.reengagement_sent_at.is_(None),
+            User.journey_state.isnot(None),  # Has some progress
+        )
+        .order_by(User.last_active.asc())
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def mark_reengagement_sent(session: AsyncSession, tg_id: int) -> None:
+    """Mark that a re-engagement message was sent to this user.
+
+    This is called ONCE per user. If user doesn't respond, we don't bother them again.
+    """
+    stmt = (
+        update(User)
+        .where(User.tg_id == tg_id)
+        .values(reengagement_sent_at=func.now())
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def clear_reengagement_on_activity(session: AsyncSession, tg_id: int) -> None:
+    """Reset re-engagement flag when user becomes active again.
+
+    This allows sending another re-engagement if user goes idle again in the future.
+    Called automatically when user sends a message.
+    """
+    stmt = (
+        update(User)
+        .where(User.tg_id == tg_id)
+        .values(reengagement_sent_at=None, last_active=func.now())
+    )
+    await session.execute(stmt)
+    await session.commit()

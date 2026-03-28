@@ -30,6 +30,8 @@ async def run_migration():
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS english_level TEXT;"))
             await conn.execute(text("ALTER TABLE pipeline_logs ADD COLUMN IF NOT EXISTS sources JSONB;"))
             await conn.execute(text("ALTER TABLE pipeline_logs ADD COLUMN IF NOT EXISTS error TEXT;"))
+            # Re-engagement tracking
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS reengagement_sent_at TIMESTAMP WITH TIME ZONE;"))
             logger.info("✅ Migrations successful!")
     except Exception as e:
         if "already exists" in str(e).lower():

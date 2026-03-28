@@ -37,6 +37,7 @@ from bot.handlers.service import error, help_command, ignore, reaction, unknown,
 from bot.handlers.onboarding import build_onboarding_handler
 from bot.handlers.suggested import build_suggested_handler
 from bot.handlers.feedback import build_feedback_handler
+from bot.handlers.engagement import setup_reengagement_job
 from crag.simple_rag import SimpleRAG
 
 logging.basicConfig(
@@ -123,6 +124,11 @@ def prepare_handlers(config: DictConfig):
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="default")
 def main(config: DictConfig) -> None:
+    # Run migrations on startup
+    from bot.migrate import run_migration
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(run_migration())
+
     rag_handlers, manag_handlers, db_session, suggested_callback, feedback_callback = prepare_handlers(config)
 
     tgbot_token = os.getenv("TGBOT_TOKEN")
@@ -189,6 +195,13 @@ def main(config: DictConfig) -> None:
     application.add_handler(unknown_handler)
 
     application.add_error_handler(error)
+
+    # Setup re-engagement job (sends follow-ups to idle users)
+    application.job_queue  # Ensure job queue is initialized
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(
+        setup_reengagement_job(application, db_session)
+    )
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
