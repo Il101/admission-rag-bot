@@ -8,12 +8,23 @@ maintainability, testability, and extensibility.
 import asyncio
 import json
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Any, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
+
+
+def _get_rerank_soft_timeout_sec() -> float:
+    """Soft timeout for reranking; 0 disables timeout."""
+    raw = os.getenv("RERANK_SOFT_TIMEOUT_SEC", "0").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.0
+    return max(0.0, value)
 
 
 # ── Pipeline Context ─────────────────────────────────────────────────────
@@ -286,9 +297,24 @@ class RerankStep(PipelineStep):
             return
 
         t0 = time.monotonic()
-        ctx.reranked_docs = await rag.arerank_documents(
-            ctx.rewritten_question, ctx.graded_docs, top_k=self.top_k
-        )
+        timeout = _get_rerank_soft_timeout_sec()
+        if timeout > 0:
+            try:
+                ctx.reranked_docs = await asyncio.wait_for(
+                    rag.arerank_documents(
+                        ctx.rewritten_question, ctx.graded_docs, top_k=self.top_k
+                    ),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.info(
+                    f"[User {ctx.tg_id}] Rerank soft-timeout after {timeout:.2f}s, keeping graded order"
+                )
+                ctx.reranked_docs = ctx.graded_docs[: self.top_k]
+        else:
+            ctx.reranked_docs = await rag.arerank_documents(
+                ctx.rewritten_question, ctx.graded_docs, top_k=self.top_k
+            )
         ctx.timings["rerank"] = time.monotonic() - t0
 
 

@@ -48,6 +48,111 @@ def _use_pipeline_shadow_enabled() -> bool:
     }
 
 
+def _safe_stream_plain_enabled() -> bool:
+    """Use plain text for partial streaming edits to avoid Telegram HTML parse errors."""
+    return os.getenv("SAFE_STREAM_PLAIN", "true").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _get_rerank_soft_timeout_sec() -> float:
+    """Soft timeout for re-ranking stage; 0 disables timeout."""
+    raw = os.getenv("RERANK_SOFT_TIMEOUT_SEC", "0").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.0
+    return max(0.0, value)
+
+
+def _strip_html_to_plain(text: str) -> str:
+    """Convert HTML-like text to plain text for Telegram fallback rendering."""
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?(?:p|div|li|ul|ol|details|summary|section|article|header|footer|h[1-6]|tr|td|th|table|thead|tbody)[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _normalize_spacing_entities(text: str) -> str:
+    """Decode HTML spacing entities and normalize narrow/non-breaking spaces."""
+    import html
+
+    normalized = html.unescape(text or "")
+    normalized = normalized.replace("\u00A0", " ").replace("\u202F", " ")
+    normalized = re.sub(r"[ \t]{2,}", " ", normalized)
+    return normalized
+
+
+def _format_deadline_tables_as_cards(text: str) -> str:
+    """Render deadline table-like blocks as compact cards for Telegram readability."""
+    if not text:
+        return text
+
+    t = _normalize_spacing_entities(text)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+
+    if "Учебное заведение" not in t:
+        return t
+
+    lines = [ln.strip() for ln in t.splitlines()]
+    result_lines: list[str] = []
+    i = 0
+    section = ""
+    table_headers = {"Учебное заведение", "Winter 2026/27", "Summer 2027"}
+
+    def _looks_like_row_start(s: str) -> bool:
+        return (
+            ("Universität" in s or "Technische" in s or "Fachhochschulen" in s or "University" in s)
+            and not s.startswith("📌")
+        )
+
+    while i < len(lines):
+        line = lines[i]
+        if not line:
+            result_lines.append("")
+            i += 1
+            continue
+
+        if line in {"📋 Бакалавриат", "📋 Магистратура"}:
+            section = line
+            result_lines.append(line)
+            i += 1
+            continue
+
+        if line in table_headers:
+            i += 1
+            continue
+
+        if _looks_like_row_start(line):
+            if i + 2 < len(lines):
+                winter = lines[i + 1]
+                summer = lines[i + 2]
+                if winter and summer and winter not in table_headers and summer not in table_headers:
+                    result_lines.append(f"📍 {line}")
+                    if section:
+                        result_lines.append(f"• Раздел: {section.replace('📋 ', '')}")
+                    result_lines.append(f"• Winter 2026/27: {winter}")
+                    result_lines.append(f"• Summer 2027: {summer}")
+                    result_lines.append("")
+                    i += 3
+                    continue
+
+        result_lines.append(line)
+        i += 1
+
+    out = "\n".join(result_lines)
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    return out
+
+
+def _postprocess_answer_text(text: str) -> str:
+    """Final answer post-processing for Telegram readability."""
+    text = _normalize_spacing_entities(text)
+    text = _format_deadline_tables_as_cards(text)
+    return text
+
+
 def _emit_observability_metrics(
     *,
     user_id: int,
@@ -192,6 +297,14 @@ async def _safe_edit_message(msg, text, parse_mode=None, reply_markup=None):
     except BadRequest as e:
         if "message is not modified" in str(e).lower():
             return True  # same content, no problem
+        if parse_mode == ParseMode.HTML and "can't parse entities" in str(e).lower():
+            plain = _strip_html_to_plain(text)
+            try:
+                await msg.edit_text(plain or "…", reply_markup=reply_markup)
+                logger.info("HTML parse fallback applied for Telegram edit")
+                return True
+            except Exception:
+                return False
         logger.warning(f"Edit failed: {e}")
         return False
     except Exception as e:
@@ -229,7 +342,10 @@ async def _stream_answer(
             if now - last_edit_time >= STREAM_EDIT_INTERVAL and new_chars >= STREAM_MIN_CHARS:
                 safe = sanitize_telegram_html(display_text + " ▌")
                 if safe.strip():
-                    await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
+                    if _safe_stream_plain_enabled():
+                        await _safe_edit_message(msg, _strip_html_to_plain(safe), parse_mode=None)
+                    else:
+                        await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
                 last_edit_len = len(display_text)
                 last_edit_time = now
 
@@ -270,7 +386,10 @@ async def _stream_answer_with_tools(
             if now - last_edit_time >= STREAM_EDIT_INTERVAL and new_chars >= STREAM_MIN_CHARS:
                 safe = sanitize_telegram_html(display_text + " ▌")
                 if safe.strip():
-                    await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
+                    if _safe_stream_plain_enabled():
+                        await _safe_edit_message(msg, _strip_html_to_plain(safe), parse_mode=None)
+                    else:
+                        await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
                 last_edit_len = len(display_text)
                 last_edit_time = now
 
@@ -465,6 +584,7 @@ async def _handle_question_core(
 
         if cached_response and not tool_result:  # Skip cache if tool was used
             clean_text, suggested = parse_suggested_buttons(cached_response)
+            clean_text = _postprocess_answer_text(clean_text)
             safe_text = sanitize_telegram_html(clean_text)
             keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
             response_delivered = await _safe_edit_message(
@@ -515,7 +635,21 @@ async def _handle_question_core(
         # 3b. Re-rank for better precision
         if use_reranking and len(docs) > 4:
             t0 = time.monotonic()
-            docs = await simple_rag.arerank_documents(actual_question, docs, top_k=6)
+            rerank_timeout = _get_rerank_soft_timeout_sec()
+            if rerank_timeout > 0:
+                try:
+                    docs = await asyncio.wait_for(
+                        simple_rag.arerank_documents(actual_question, docs, top_k=6),
+                        timeout=rerank_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.info(
+                        "[User %s] Rerank soft-timeout after %.2fs, keeping graded order",
+                        tg_id, rerank_timeout,
+                    )
+                    docs = docs[:6]
+            else:
+                docs = await simple_rag.arerank_documents(actual_question, docs, top_k=6)
             timings["rerank"] = time.monotonic() - t0
 
         # Collect source URLs from surviving docs for the pipeline log
@@ -576,6 +710,7 @@ async def _handle_question_core(
         asyncio.create_task(simple_rag.cache_answer(actual_question, full_response))
 
         clean_text, suggested = parse_suggested_buttons(full_response)
+        clean_text = _postprocess_answer_text(clean_text)
 
         sources_text = docs_to_sources_str(docs)
         if sources_text:
@@ -736,6 +871,7 @@ async def _handle_question_core_v2(
             ensure_ascii=False,
         )
         clean_text, suggested = parse_suggested_buttons(full_response)
+        clean_text = _postprocess_answer_text(clean_text)
 
         sources_text = docs_to_sources_str(docs) if docs else ""
         if sources_text:

@@ -31,3 +31,18 @@ def test_build_user_filters_unknown_country():
 def test_remove_bot_command_smoke():
     assert remove_bot_command("/ans@testbot Как дела?", "ans", "@testbot") == "Как дела?"
 
+
+def test_deadline_table_renders_as_cards():
+    text = (
+        "📋 Бакалавриат\n\n"
+        "Учебное заведение\n"
+        "Winter 2026/27\n"
+        "Summer 2027\n"
+        "Universität Innsbruck (UIBK)\n"
+        "1 апреля — 15 мая 2026\n"
+        "1 сентября — 15 октября 2026\n"
+    )
+    out = rag_handlers._format_deadline_tables_as_cards(text)
+    assert "📍 Universität Innsbruck (UIBK)" in out
+    assert "• Winter 2026/27: 1 апреля — 15 мая 2026" in out
+    assert "• Summer 2027: 1 сентября — 15 октября 2026" in out
