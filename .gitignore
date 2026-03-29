@@ -184,3 +184,6 @@ outputs
 
 # Prod envs
 prod.env
+# Knowledge base - sensitive data
+knowledge_base/
+knowledge_base_BACKUP_*/

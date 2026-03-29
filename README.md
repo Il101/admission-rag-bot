@@ -1,5 +1,22 @@
 # FreshmanRAG_bot
-FreshmanRAG_bot is a Ukrainian Telegram bot designed to assist first-year students by providing answers to frequently asked questions using Retrieval-Augmented Generation (RAG) with a Large Language Model (LLM). Freshmen often have numerous questions, but they tend to ignore pinned messages and guides. This leads to repeated inquiries, making it challenging for volunteers to answer each of them. The bot aims to alleviate this burden by autonomously delivering answers or directing users to relevant links.
+
+![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
+![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-blue?logo=telegram)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)
+![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)
+
+> 🇺🇦 Ukrainian Telegram bot using RAG to help first-year students with university admission questions
+
+FreshmanRAG_bot is a Ukrainian Telegram bot designed to assist first-year students by providing answers to frequently asked questions using **Retrieval-Augmented Generation (RAG)** with a **Large Language Model (LLM)**. Freshmen often have numerous questions, but they tend to ignore pinned messages and guides. This leads to repeated inquiries, making it challenging for volunteers to answer each of them. The bot aims to alleviate this burden by autonomously delivering answers or directing users to relevant links.
+
+## ✨ Key Features
+
+- 🤖 **Three RAG Pipelines**: Simple RAG, Conditional with Filtering, and with Question Rewriting
+- 🔍 **Advanced Retrieval**: Ensemble retriever combining Dense (pgvector) + Sparse (BM25) search
+- 🧠 **LLM Support**: Gemma2-2B, OpenAI, Google Gemini
+- 📊 **Parent Document Retrieval**: Maintains context while using precise chunks
+- 🇺🇦 **Ukrainian Language**: Optimized for Ukrainian with multilingual models
+- 🐳 **Docker Ready**: Easy deployment with Docker Compose
 
 ## Bot Functionality
 
