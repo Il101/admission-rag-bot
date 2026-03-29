@@ -22,10 +22,21 @@ from bot.memory import (
 from crag.observability import (
     is_observability_enabled,
     log_pipeline_metrics,
+    log_routing_decision,
+    increment_routing_stat,
     trace_full_pipeline,
 )
 from crag.simple_rag import documents_to_context_str
 from crag.pipeline import PipelineContext, create_default_pipeline
+from crag.router import (
+    classify_intent,
+    Intent,
+    should_use_rag,
+    should_use_tools,
+    is_chitchat,
+    get_chitchat_response,
+)
+from crag.tools import execute_tool, get_tool_schemas
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +75,13 @@ def _use_new_pipeline_enabled() -> bool:
 def _use_pipeline_shadow_enabled() -> bool:
     """Enable background shadow run of pipeline v2 while serving legacy path."""
     return os.getenv("USE_NEW_PIPELINE_SHADOW", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _use_routing_enabled() -> bool:
+    """Enable smart routing with intent classification (bypasses RAG when not needed)."""
+    return os.getenv("USE_ROUTING", "true").strip().lower() in {
         "1", "true", "yes", "on",
     }
 
@@ -1036,6 +1054,252 @@ async def _run_pipeline_v2_shadow(
         )
 
 
+async def _handle_question_with_router(
+    context,
+    simple_rag,
+    db_session,
+    chat_id: int,
+    reply_to_id: int,
+    tg_id: int,
+    question: str,
+    onboarding_data: dict,
+    db_session_factory=None,
+):
+    """Smart routing handler that decides whether to use TOOL_ONLY, RAG_ONLY, or both.
+
+    This is the new default handler that uses intent classification to optimize performance.
+    """
+    start_time = time.monotonic()
+
+    # Step 1: Classify intent
+    route = classify_intent(question)
+    classification_time_ms = (time.monotonic() - start_time) * 1000
+
+    logger.info(
+        "[User %s] Intent classified: %s (confidence=%.2f, tools=%s) - %s",
+        tg_id,
+        route.intent.value,
+        route.confidence,
+        route.suggested_tools,
+        route.reason,
+    )
+
+    # Log routing decision for observability
+    log_routing_decision(
+        user_id=tg_id,
+        question=question,
+        intent=route.intent.value,
+        suggested_tools=route.suggested_tools,
+        confidence=route.confidence,
+        reason=route.reason,
+        latency_ms=classification_time_ms,
+    )
+    increment_routing_stat(route.intent.value)
+
+    # Step 2: Handle CHITCHAT (fastest path)
+    if is_chitchat(route):
+        response_text = get_chitchat_response(question)
+        msg = await context.bot.send_message(
+            chat_id=chat_id,
+            reply_to_message_id=reply_to_id,
+            text=response_text,
+        )
+        _store_qa(context, msg.message_id, question, response_text)
+        await add_chat_messages(db_session, tg_id, question, response_text)
+        logger.info("[User %s] Chitchat response sent in %.2fs", tg_id, time.monotonic() - start_time)
+        return
+
+    # Step 3: Load user context (needed for tools and RAG)
+    onboarding_data = await _ensure_onboarding_loaded(context, db_session, tg_id)
+    memory, chat_history_str, memory_context_str = await _load_memory(
+        db_session, tg_id, onboarding_data
+    )
+
+    tool_results = {}
+    tool_context_str = ""
+
+    # Step 4: Execute tools if needed
+    if should_use_tools(route) and route.suggested_tools:
+        msg = await context.bot.send_message(
+            chat_id=chat_id,
+            reply_to_message_id=reply_to_id,
+            text="⚙️ Проверяю данные...",
+        )
+
+        for tool_name in route.suggested_tools:
+            try:
+                # Execute tool with user context injection
+                result = await execute_tool(
+                    name=tool_name,
+                    arguments={},  # LLM will provide args in full implementation
+                    session_factory=db_session_factory,
+                    tg_id=tg_id,
+                )
+                tool_results[tool_name] = result
+                logger.info("[User %s] Tool %s executed: %s", tg_id, tool_name, result)
+            except Exception as e:
+                logger.error("[User %s] Tool %s failed: %s", tg_id, tool_name, e)
+                tool_results[tool_name] = {"error": str(e)}
+
+        # Format tool results for context
+        tool_context_parts = []
+        for tool_name, result in tool_results.items():
+            tool_context_parts.append(f"**{tool_name}:**\n{json.dumps(result, ensure_ascii=False, indent=2)}")
+        tool_context_str = "\n\n".join(tool_context_parts)
+
+    # Step 5: Handle TOOL_ONLY (no RAG needed)
+    if route.intent == Intent.TOOL_ONLY:
+        # Format tool results into readable response
+        response_parts = []
+
+        for tool_name, result in tool_results.items():
+            if "error" in result:
+                response_parts.append(f"❌ {result['error']}")
+            elif tool_name == "get_my_progress":
+                msg_text = result.get("message", "")
+                stages = result.get("stages", [])
+                completed = [s for s in stages if s.get("completed")]
+                pending = [s for s in stages if not s.get("completed")]
+
+                response_parts.append(f"📊 {msg_text}\n")
+                if completed:
+                    response_parts.append("✅ Пройдено:")
+                    for s in completed:
+                        response_parts.append(f"  • {s['label']}")
+                if pending:
+                    response_parts.append("\n⬜ Осталось:")
+                    for s in pending[:5]:
+                        response_parts.append(f"  • {s['label']}")
+
+            elif tool_name == "get_next_steps":
+                steps = result.get("next_steps", [])
+                if steps:
+                    response_parts.append("🎯 Рекомендую сделать дальше:\n")
+                    for i, step in enumerate(steps, 1):
+                        priority_emoji = {"urgent": "🔥", "high": "⚡", "medium": "📌"}.get(
+                            step.get("priority", "medium"), "📌"
+                        )
+                        response_parts.append(f"{i}. {priority_emoji} {step.get('action', step.get('stage', ''))}")
+
+            elif tool_name in ("check_deadline", "calculate_budget", "calculate_days_until"):
+                # Simple JSON dump for now
+                response_parts.append(json.dumps(result, ensure_ascii=False, indent=2))
+
+            else:
+                response_parts.append(result.get("message", json.dumps(result, ensure_ascii=False)))
+
+        final_response = "\n\n".join(response_parts) if response_parts else "Не удалось получить данные."
+
+        # Update or send new message
+        safe_text = sanitize_telegram_html(final_response)
+        if 'msg' in locals():
+            await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML)
+        else:
+            msg = await context.bot.send_message(
+                chat_id=chat_id,
+                reply_to_message_id=reply_to_id,
+                text=safe_text,
+                parse_mode=ParseMode.HTML,
+            )
+
+        _store_qa(context, msg.message_id, question, final_response)
+        await add_chat_messages(db_session, tg_id, question, final_response)
+
+        logger.info(
+            "[User %s] TOOL_ONLY response complete in %.2fs",
+            tg_id,
+            time.monotonic() - start_time
+        )
+        return
+
+    # Step 6: Use RAG (for RAG_ONLY or TOOL_THEN_RAG)
+    # Delegate to existing pipeline with tool context
+    if not 'msg' in locals():
+        msg = await context.bot.send_message(
+            chat_id=chat_id,
+            reply_to_message_id=reply_to_id,
+            text="🔍 Ищу информацию...",
+        )
+
+    # Build enhanced memory context with tool results
+    enhanced_memory = memory_context_str
+    if tool_context_str:
+        enhanced_memory += f"\n\n## Данные из персональных инструментов:\n{tool_context_str}"
+
+    # Now call the v2 pipeline with enhanced context
+    # (This is a simplified version - in production you'd want to stream, etc.)
+    await _update_processing_phase(msg, "analyze")
+
+    try:
+        pipeline = create_default_pipeline(
+            stream_callback=None,  # Simplified for now
+            use_hyde=True,
+            use_decomposition=False,
+            use_smart_retrieval=True,
+            use_reranking=True,
+            use_tools=False,  # We already executed tools above
+            top_k=10,
+            rerank_top_k=6,
+        )
+
+        ctx = PipelineContext(
+            question=question,
+            tg_id=tg_id,
+            onboarding_data=onboarding_data,
+            memory_context=enhanced_memory,
+            chat_history=chat_history_str,
+            journey_state=memory.get("journey_state") or {},
+            conversation_summary=memory.get("conversation_summary") or "",
+        )
+
+        ctx = await pipeline.run(ctx, simple_rag)
+
+        full_response = ctx.answer_json or json.dumps(
+            {"answer": "К сожалению, не удалось сформировать ответ.", "suggested_questions": []},
+            ensure_ascii=False,
+        )
+
+        clean_text, suggested = parse_suggested_buttons(full_response)
+        clean_text = _postprocess_answer_text(clean_text)
+        clean_text = _apply_confirmed_fact_guardrails(clean_text, memory)
+
+        docs = ctx.reranked_docs or ctx.graded_docs or ctx.retrieved_docs or []
+        sources_text = docs_to_sources_str(docs) if docs else ""
+        if sources_text:
+            clean_text += "\n\nИсточники:\n" + sources_text
+
+        safe_text = sanitize_telegram_html(clean_text)
+        keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
+
+        await _safe_edit_message(msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+        if suggested:
+            _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
+        _store_qa(context, msg.message_id, question, clean_text)
+        await add_chat_messages(db_session, tg_id, question, clean_text)
+
+        if db_session_factory:
+            asyncio.create_task(
+                update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
+            )
+
+        logger.info(
+            "[User %s] %s response complete in %.2fs | %d docs",
+            tg_id,
+            route.intent.value,
+            time.monotonic() - start_time,
+            len(docs),
+        )
+
+    except Exception as exc:
+        logger.exception("[User %s] RAG pipeline error", tg_id)
+        await _safe_edit_message(
+            msg,
+            "⚠️ Произошла ошибка при обработке запроса. Попробуй переформулировать вопрос.",
+            parse_mode=None,
+        )
+
+
 async def _handle_question_with_optional_trace(handler_coro, tg_id: int, question: str):
     """Execute handler with optional observability trace context."""
     if is_observability_enabled():
@@ -1067,8 +1331,17 @@ async def answer(
         return
 
     try:
+        use_routing = _use_routing_enabled()
         use_new = _use_new_pipeline_enabled()
-        handler = _handle_question_core_v2 if use_new else _handle_question_core
+
+        # Priority: routing > new pipeline > legacy
+        if use_routing:
+            handler = _handle_question_with_router
+        elif use_new:
+            handler = _handle_question_core_v2
+        else:
+            handler = _handle_question_core
+
         user_id = update.effective_user.id
         await _handle_question_with_optional_trace(
             handler(

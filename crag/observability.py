@@ -372,6 +372,120 @@ def log_pipeline_metrics(
         logger.debug(f"Failed to log metrics: {e}")
 
 
+def log_routing_decision(
+    user_id: int,
+    question: str,
+    intent: str,
+    suggested_tools: list,
+    confidence: float,
+    reason: str,
+    latency_ms: float = 0,
+):
+    """Log intent routing decision to LangFuse.
+
+    Tracks distribution of intents for analytics and pattern optimization.
+
+    Args:
+        user_id: Telegram user ID
+        question: User's question
+        intent: Classified intent (tool_only, rag_only, tool_rag, chitchat)
+        suggested_tools: List of suggested tool names
+        confidence: Classification confidence (0-1)
+        reason: Human-readable reason for classification
+        latency_ms: Time taken to classify (milliseconds)
+    """
+    langfuse = _get_langfuse()
+    if not langfuse:
+        # Fallback to standard logging for local debugging
+        logger.info(
+            f"[ROUTING] user={user_id} intent={intent} confidence={confidence:.2f} "
+            f"tools={suggested_tools} latency={latency_ms:.1f}ms reason={reason}"
+        )
+        return
+
+    try:
+        # Log as event with full metadata
+        langfuse.event(
+            name="routing_decision",
+            metadata={
+                "user_id": user_id,
+                "question": question[:200],
+                "intent": intent,
+                "suggested_tools": suggested_tools,
+                "confidence": confidence,
+                "reason": reason,
+                "latency_ms": latency_ms,
+            },
+        )
+
+        # Log confidence as score for analytics
+        langfuse.score(
+            name="routing_confidence",
+            value=confidence,
+            data_type="NUMERIC",
+            comment=f"Intent: {intent}",
+        )
+
+        langfuse.flush()
+    except Exception as e:
+        logger.debug(f"Failed to log routing decision: {e}")
+
+
+# ── In-memory metrics for local stats ──────────────────────────────────
+
+_routing_stats = {
+    "tool_only": 0,
+    "rag_only": 0,
+    "tool_rag": 0,
+    "chitchat": 0,
+    "total": 0,
+}
+
+
+def increment_routing_stat(intent: str):
+    """Increment in-memory routing counter."""
+    global _routing_stats
+    _routing_stats["total"] += 1
+    if intent in _routing_stats:
+        _routing_stats[intent] += 1
+
+
+def get_routing_stats() -> dict:
+    """Get current routing statistics.
+
+    Returns:
+        dict with counts and percentages for each intent type
+    """
+    total = _routing_stats["total"]
+    if total == 0:
+        return {
+            "total": 0,
+            "distribution": {},
+            "percentages": {},
+        }
+
+    distribution = {k: v for k, v in _routing_stats.items() if k != "total"}
+    percentages = {k: round(v / total * 100, 1) for k, v in distribution.items()}
+
+    return {
+        "total": total,
+        "distribution": distribution,
+        "percentages": percentages,
+    }
+
+
+def reset_routing_stats():
+    """Reset routing statistics (useful for testing)."""
+    global _routing_stats
+    _routing_stats = {
+        "tool_only": 0,
+        "rag_only": 0,
+        "tool_rag": 0,
+        "chitchat": 0,
+        "total": 0,
+    }
+
+
 def shutdown():
     """Shutdown LangFuse client gracefully."""
     global _langfuse_client
