@@ -1,106 +1,272 @@
-# FreshmanRAG_bot
+# FreshmanRAG Bot
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
-![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-blue?logo=telegram)
+![LangChain](https://img.shields.io/badge/LangChain-RAG-green.svg)
+![Telegram Bot](https://img.shields.io/badge/Telegram-Bot%20API-blue?logo=telegram)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-316192?logo=postgresql)
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)
-![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-> 🇺🇦 Ukrainian Telegram bot using RAG to help first-year students with university admission questions
+> 🎓 AI-powered Telegram assistant helping students with university admission questions using advanced RAG techniques
 
-FreshmanRAG_bot is a Ukrainian Telegram bot designed to assist first-year students by providing answers to frequently asked questions using **Retrieval-Augmented Generation (RAG)** with a **Large Language Model (LLM)**. Freshmen often have numerous questions, but they tend to ignore pinned messages and guides. This leads to repeated inquiries, making it challenging for volunteers to answer each of them. The bot aims to alleviate this burden by autonomously delivering answers or directing users to relevant links.
+An intelligent Telegram bot built with **Retrieval-Augmented Generation (RAG)** to automatically answer frequently asked questions about university admission, visa processes, housing, scholarships, and student life in Austria. Reduces volunteer workload by providing instant, accurate responses from a curated knowledge base.
 
-## ✨ Key Features
+## ✨ Features
 
-- 🤖 **Three RAG Pipelines**: Simple RAG, Conditional with Filtering, and with Question Rewriting
-- 🔍 **Advanced Retrieval**: Ensemble retriever combining Dense (pgvector) + Sparse (BM25) search
-- 🧠 **LLM Support**: Gemma2-2B, OpenAI, Google Gemini
-- 📊 **Parent Document Retrieval**: Maintains context while using precise chunks
-- 🇺🇦 **Ukrainian Language**: Optimized for Ukrainian with multilingual models
-- 🐳 **Docker Ready**: Easy deployment with Docker Compose
+### 🤖 Advanced RAG Pipelines
+- **Simple RAG**: Direct document retrieval and answer generation
+- **Conditional RAG with Filtering**: LLM-powered document relevance scoring
+- **Conditional RAG with Question Rewriting**: Automatic query reformulation for better results
 
-## Bot Functionality
+### 🔍 Hybrid Search System
+- **Dense Vector Search**: Semantic search using sentence embeddings (pgvector)
+- **Sparse BM25 Search**: Keyword-based retrieval (Elasticsearch)
+- **Ensemble Retriever**: Combines both approaches with Reciprocal Rank Fusion
+- **Parent Document Strategy**: Searches small chunks, returns full context
 
-### Commands
+### 🧠 Flexible LLM Support
+- **Gemma2-2B** (default): CPU-optimized quantized model
+- **OpenAI GPT models**: Optional cloud integration
+- **Google Gemini**: Alternative cloud LLM
+- Configurable via Hydra framework
 
-The bot has two categories of commands: user commands and admin commands. 
+### 🇺🇦 Ukrainian Language Optimization
+- Uses multilingual sentence transformers optimized for Ukrainian
+- Ukrainian-aware text processing and embeddings
 
-Admin commands enable actions like banning users, adding information to the knowledge base, and appending public links to private messages. These can be found in the [management handlers](./bot/handlers/management.py).
+### 🛠 Production-Ready
+- Docker Compose deployment
+- PostgreSQL with pgvector extension
+- Elasticsearch for BM25 search
+- Comprehensive configuration system (Hydra)
+- Admin commands for knowledge base management
 
-User commands are tailored for the students (freshmen) and include:
+## 🏗 Architecture
 
-- **/docs <question>** - Returns documents or facts relevant to the query.
-- **/docs_rep** - Retrieves documents or facts relevant to a query from a replied message.
-- **/ans <question>** - Provides an answer to a question using RAG.
-- **/ans_rep** - Answers a question from a replied message using RAG.
-- **/help** - Displays a description of user commands.
-- **/start** - Shows a welcome message.
+### RAG Pipelines
 
-### RAG Pipeline Types
+The bot implements three sophisticated RAG pipelines, each with increasing intelligence:
 
-Currently, three distinct RAG pipelines are implemented. By default, the bot uses the **Conditional RAG with Question Rewriting** pipeline. You can change this in the [configuration settings](#configuration). All pipelines support the option to return only documents relevant to a question without generating an LLM answer, depicted as a `stop` edge in all the diagrams below.
-
-#### Simple RAG
-
-The `Simple RAG` pipeline uses a [retriever](#retrievers) to find relevant documents from the knowledge base, optionally utilizing this information for answer generation.
-
-![Simple RAG](assets/simple_rag.png)
-
-#### Conditional RAG with Document Filtering
-
-This pipeline expands on the `Simple RAG` by adding a step to filter out documents irrelevant to the question. If all documents are filtered out, a message is generated (`giveup` node) indicating no relevant document is available. It currently uses an LLM with a special prompt for document grading, though contributions for encoder-only models for filtering are welcome.
-
-![Conditional RAG with filtering](assets/rag_with_filtering.png)
-
-#### Conditional RAG with Question Rewriting
-
-The `Conditional RAG with Question Rewriting` takes a further step if the documents are filtered out. Instead of giving up, it attempts to rephrase the question (within a set limit) and uses the rewritten query for a new search and answering process.
-
-![Conditional RAG with question rewriting](assets/rag_with_question_rewriting.png)
-
-## LLMs
-
-The bot currently uses the Gemma2-2B-it (Q5-K quantized) model as its LLM. This choice stems from limited resources; larger models require hosting on GPU nodes, which is costly. And on CPU even the smallest LLaMa-3.1-8b quantized model takes a minute to run with llama.cpp. That's why Gemma2-2B-it was chosen for its solid performance in the given size and its reasonable understanding of Ukrainian. Future plans include fine-tuning this model for improved Ukrainian comprehension and RAG capabilities, with scripts available in the [llms directory](./llms/).
-
-Optionally, you can configure the bot to use OpenAI models by inputting your `OPENAI_API_KEY` in the .env file and adjusting the LLM configuration.
-
-## Retrievers
-We support various retriever types:
-
-- Dense vector retrievers using Sentence BERT model [*lang-uk/ukr-paraphrase-multilingual-mpnet-base*](https://huggingface.co/lang-uk/ukr-paraphrase-multilingual-mpnet-base) with `pgvector` as a storage method.
-- Parent document retrievers, which use dense vector retrievers for finding a small relevant document and pass a full parent document as context to an LLM to retain relevant information.
-- BM25 Sparse Retriever, utilizing `Elasticsearch` for sparse keyword searches using the BM25 algorithm.
-- **Default**: The Ensemble Retriever combines results from the parent document retriever and BM25 retriever using the Reciprocal Rank Fusion algorithm to provide the most relevant information.
-
-## Configuration
-To configure the bot I use a reliable and flexible tool called Hydra. In the [configs](./configs/) directory you can find and add your own configs. Please read the [docs](https://hydra.cc/docs/1.3/intro/) to learn how to do it properly. By default (and especially inside a docker container), the bot will load the default config, so in addition to adding new configs, user will also need to modify the [default.yaml](./configs/default.yaml).
-
-The overall structure of the configs is the following:
-- llm: language model configuration
-- retriever: retriever configuration
-- prompts: used to query a language model
-- pipeline: RAG pipeline configuration
-- knowledge: utilities for loading and pre-processing documents
-    - loader: utility for loading documents from given URLs
-    - transform: utility for pre-processing documents before uploading to a vector/elasticsearch store
-
-## How to deploy
-The easiest way to deploy the bot is to (**target CPU must support all instruction sets that GitHub Actions runner support**):
-1. Download a release docker-compose file and optionally required scripts from the [init_scripts](./init_scripts/) directory
+#### 1. Simple RAG
+Direct retrieval and generation pipeline:
 ```
-wget https://raw.githubusercontent.com/ShkalikovOleh/FreshmanRAG_bot/master/docker-compose.release.yml
+Query → Retriever → Documents → LLM → Answer
 ```
-2. Load all desired models (please use scripts from [init_scripts](./init_scripts/)) into the `.models` directory.
-3. Place `.env` file with your api keys and other variables (as in the [example.env](./example.env)) in the repo directory
-4. Prepare directories for mounting volumes via
+
+#### 2. Conditional RAG with Filtering
+Adds document relevance scoring:
 ```
+Query → Retriever → Documents → Grading (LLM) → Relevant Docs → LLM → Answer
+                                              ↓ (if none relevant)
+                                           Give Up Message
+```
+
+#### 3. Conditional RAG with Question Rewriting (Default)
+Automatically reformulates queries for better results:
+```
+Query → Retriever → Documents → Grading → Relevant Docs → LLM → Answer
+                                       ↓ (if none relevant)
+                                  Rewrite Query → Retry (max 3 times)
+```
+
+### Technology Stack
+
+**Backend Framework**
+- Python 3.11+
+- aiogram 3.x (Telegram Bot API)
+- LangChain (RAG orchestration)
+
+**Vector Search & Retrieval**
+- PostgreSQL 16 with pgvector extension
+- Elasticsearch 8.x (BM25 search)
+- SentenceTransformers (`lang-uk/ukr-paraphrase-multilingual-mpnet-base`)
+
+**LLM Integration**
+- llama.cpp (local inference)
+- OpenAI API (optional)
+- Google Gemini API (optional)
+
+**Configuration & Orchestration**
+- Hydra (configuration management)
+- Docker Compose (deployment)
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Docker & Docker Compose
+- 8GB+ RAM (for local LLM inference)
+- Telegram Bot Token (from [@BotFather](https://t.me/botfather))
+
+### Installation
+
+1. **Clone the repository**
+```bash
+git clone https://github.com/Il101/FreshmanRAG_bot.git
+cd FreshmanRAG_bot
+```
+
+2. **Download required models**
+```bash
+bash init_scripts/download_embeddings.sh
+bash init_scripts/download_llm.sh  # Optional: for local inference
+```
+
+3. **Configure environment**
+```bash
+cp example.env .env
+# Edit .env with your settings:
+# - TGBOT_TOKEN: Your Telegram bot token
+# - GOOGLE_API_KEY or OPENAI_API_KEY: If using cloud LLMs
+```
+
+4. **Prepare data directories**
+```bash
 bash init_scripts/prepare_data_volumes.sh
 ```
-5. Run with docker-compose
-```
-docker compose -f docker-compose.release.yml up -d
+
+5. **Start services**
+```bash
+docker compose up -d
 ```
 
-Alternatively, you can clone the repo and build docker container on your target machine. Then please use the following command:
+The bot will be online and ready to answer questions!
+
+## 💬 Bot Commands
+
+### User Commands
+- `/start` - Welcome message and bot introduction
+- `/help` - Display available commands
+- `/ans <question>` - Get AI-generated answer to your question
+- `/ans_rep` - Answer question from replied message
+- `/docs <question>` - Get relevant documents without LLM answer
+- `/docs_rep` - Get documents from replied message
+
+### Admin Commands
+- `/ban <user_id>` - Ban user from using the bot
+- `/unban <user_id>` - Unban user
+- `/add_fact` - Add information to knowledge base
+- `/add_link` - Add public resource link
+
+*Admin commands require authorized Telegram ID in configuration*
+
+## ⚙️ Configuration
+
+The bot uses [Hydra](https://hydra.cc/) for flexible configuration management. All configs are in the `configs/` directory.
+
+### Configuration Structure
 ```
-docker compose -f docker-compose.yml up -d
+configs/
+├── default.yaml          # Main configuration
+├── llm/                  # LLM provider configs
+├── retriever/            # Retriever strategy configs
+├── prompts/              # System prompts
+├── pipeline/             # RAG pipeline configs
+└── knowledge/            # Data loading configs
 ```
+
+### Switching RAG Pipelines
+
+Edit `configs/default.yaml`:
+```yaml
+defaults:
+  - pipeline: simple_rag              # Simple RAG
+  # - pipeline: rag_with_filtering    # With filtering
+  # - pipeline: rag_with_rewriting    # With rewriting (default)
+```
+
+### Using Different LLMs
+
+**OpenAI:**
+```yaml
+# configs/default.yaml
+defaults:
+  - llm: openai
+```
+```bash
+# .env
+OPENAI_API_KEY=your_key_here
+```
+
+**Google Gemini:**
+```yaml
+defaults:
+  - llm: gemini
+```
+```bash
+# .env
+GOOGLE_API_KEY=your_key_here
+```
+
+## 📊 Project Structure
+
+```
+FreshmanRAG_bot/
+├── bot/                  # Telegram bot implementation
+│   ├── handlers/         # Command handlers
+│   ├── middlewares/      # Bot middlewares
+│   └── filters/          # Message filters
+├── crag/                 # RAG pipeline implementation
+│   ├── chains/           # LangChain workflows
+│   ├── llm_providers.py  # LLM integrations
+│   └── retrievers.py     # Search implementations
+├── configs/              # Hydra configuration
+├── init_scripts/         # Deployment utilities
+├── knowledge_base/       # Knowledge base (not in git)
+├── tests/                # Unit tests
+└── docker-compose.yml    # Docker orchestration
+```
+
+## 🔧 Development
+
+### Running Tests
+```bash
+pytest tests/
+```
+
+### Adding Knowledge
+The bot's knowledge base is organized in markdown files (excluded from git for privacy):
+```
+knowledge_base/
+├── universities/         # University-specific info
+├── processes/            # Visa, housing, etc.
+├── financial/            # Costs, scholarships
+└── language/             # Language requirements
+```
+
+Add new documents and run ingestion:
+```bash
+python ingest_all.py
+```
+
+## 📈 Use Cases
+
+- 🎓 **University Admission Support**: Answer questions about applications, requirements, deadlines
+- 🏠 **Student Life Guidance**: Housing, budgets, city information
+- 🛂 **Visa & Immigration**: D-visa, residence permits, documentation
+- 💰 **Financial Planning**: Tuition fees, scholarships, cost of living
+- 🌍 **Language Requirements**: German/English requirements, preparatory courses
+
+## 🤝 Contributing
+
+Contributions are welcome! Areas for improvement:
+- Fine-tuning LLMs for Ukrainian
+- Adding encoder-based document filtering
+- Expanding retrieval strategies
+- UI/UX improvements for admin tools
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+Built with:
+- [LangChain](https://github.com/langchain-ai/langchain) - RAG framework
+- [aiogram](https://github.com/aiogram/aiogram) - Telegram Bot framework
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) - Local LLM inference
+- [pgvector](https://github.com/pgvector/pgvector) - Vector similarity search
+
+---
+
+**Author**: Ilia Zharikov  
+**Contact**: [LinkedIn](https://www.linkedin.com/in/ilia-zharikov)
