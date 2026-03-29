@@ -1,4 +1,4 @@
-# FreshmanRAG Bot
+# admission-rag-bot
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![LangChain](https://img.shields.io/badge/LangChain-RAG-green.svg)
@@ -101,8 +101,8 @@ Query → Retriever → Documents → Grading → Relevant Docs → LLM → Answ
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/Il101/FreshmanRAG_bot.git
-cd FreshmanRAG_bot
+git clone https://github.com/Il101/admission-rag-bot.git
+cd admission-rag-bot
 ```
 
 2. **Download required models**
@@ -200,7 +200,7 @@ GOOGLE_API_KEY=your_key_here
 ## 📊 Project Structure
 
 ```
-FreshmanRAG_bot/
+admission-rag-bot/
 ├── bot/                  # Telegram bot implementation
 │   ├── handlers/         # Command handlers
 │   ├── middlewares/      # Bot middlewares

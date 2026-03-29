@@ -3,10 +3,10 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "FreshmanRAG_bot"
+name = "admission-rag-bot"
 version = "2024.0.1"
 authors = [
-    {name = "Oleh Shkalikov", email = "Shkalikov.Oleh@gmail.com"},
+    {name = "Ilia Zharikov", email = "ilia.zharikov.dev@gmail.com"},
 ]
 description = "Ukrainian Telegram bot powered by Conditional RAG for first-year student"
 requires-python = ">=3.11"
@@ -24,7 +24,7 @@ namespaces = false
 where = ["."]
 
 [project.urls]
-Repository = "https://github.com/ShkalikovOleh/FreshmanRAG_bot"
+Repository = "https://github.com/Il101/admission-rag-bot"
 
 [tool.isort]
 profile = "black"
