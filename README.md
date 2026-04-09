@@ -11,6 +11,16 @@
 
 An intelligent Telegram bot built with **Retrieval-Augmented Generation (RAG)** to automatically answer frequently asked questions about university admission, visa processes, housing, scholarships, and student life in Austria. Reduces volunteer workload by providing instant, accurate responses from a curated knowledge base.
 
+## Why This Bot?
+
+Built to reduce volunteer workload during university admission season. Handles FAQ about applications, visa processes, housing, and student life — so volunteers can focus on complex individual cases.
+
+**Technical highlights:**
+- 3 RAG pipeline variants with increasing sophistication
+- Hybrid dense + sparse retrieval (pgvector + Elasticsearch BM25)
+- Reciprocal Rank Fusion ensemble retrieval
+- Configurable via Hydra — swap LLMs and retrieval strategies without code changes
+
 ## ✨ Features
 
 ### 🤖 Advanced RAG Pipelines
