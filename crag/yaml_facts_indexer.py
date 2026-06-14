@@ -6,11 +6,50 @@ Each fact entry becomes a standalone chunk with rich metadata for retrieval.
 
 import logging
 import os
+import re
 import yaml
 from pathlib import Path
 from typing import Generator
 
 logger = logging.getLogger(__name__)
+
+# Matches Austrian semester labels like "WS2026/27", "WS2026", "SS2027".
+_SEMESTER_RE = re.compile(r'^(WS|SS)(\d{4})(?:/(\d{2,4}))?$', re.IGNORECASE)
+
+
+def _derive_valid_for(entry: dict, semester: str | None = None) -> str:
+    """Derive the academic year (e.g. "2026/27") a fact applies to.
+
+    Priority:
+    1. An explicit `valid_for` field on the entry (used as-is).
+    2. The `semester` label (e.g. "WS2026/27" -> "2026/27", "SS2027" -> "2026/27"),
+       following the Austrian convention that the academic year starts with the
+       winter semester (WS) and ends with the following summer semester (SS).
+
+    Returns an empty string if no value can be safely derived (never guesses).
+    """
+    explicit = entry.get('valid_for') if isinstance(entry, dict) else None
+    if explicit:
+        return str(explicit)
+
+    if not semester:
+        return ''
+
+    match = _SEMESTER_RE.match(str(semester).strip())
+    if not match:
+        return ''
+
+    term, year, year_suffix = match.groups()
+    year = int(year)
+
+    if term.upper() == 'WS':
+        if year_suffix:
+            return f"{year}/{year_suffix}"
+        return f"{year}/{str(year + 1)[-2:]}"
+
+    # SS<year> belongs to the academic year that started the previous winter,
+    # e.g. SS2027 -> 2026/27.
+    return f"{year - 1}/{str(year)[-2:]}"
 
 
 def infer_entity_type_for_yaml_chunk(metadata: dict) -> str:
@@ -105,18 +144,26 @@ def _extract_deadline_chunks(data: dict, uni_id: str, uni_name: str) -> list[dic
 
         source_url = deadline.get('source_url', data.get('source_urls', [''])[0] if isinstance(data.get('source_urls'), list) else '')
 
+        valid_for = _derive_valid_for(deadline, semester)
+        if valid_for:
+            lines.append(f"(актуально для приёма {valid_for})")
+
+        metadata = {
+            'source': f"facts/universities/{uni_id}.yaml",
+            'title': f"Дедлайн {uni_name}",
+            'fact_type': 'deadline',
+            'university': uni_id,
+            'semester': semester,
+            'category': category,
+            'source_url': source_url,
+            'is_yaml_fact': True,
+        }
+        if valid_for:
+            metadata['valid_for'] = valid_for
+
         chunks.append({
             'content': "\n".join(lines),
-            'metadata': {
-                'source': f"facts/universities/{uni_id}.yaml",
-                'title': f"Дедлайн {uni_name}",
-                'fact_type': 'deadline',
-                'university': uni_id,
-                'semester': semester,
-                'category': category,
-                'source_url': source_url,
-                'is_yaml_fact': True,
-            }
+            'metadata': metadata,
         })
 
     return chunks
@@ -154,17 +201,25 @@ def _extract_tuition_chunks(data: dict, uni_id: str, uni_name: str) -> list[dict
 
         source_url = tuition.get('source_url', '')
 
+        valid_for = _derive_valid_for(tuition)
+        if valid_for:
+            lines.append(f"(актуально для приёма {valid_for})")
+
+        metadata = {
+            'source': f"facts/universities/{uni_id}.yaml",
+            'title': f"Стоимость {uni_name}",
+            'fact_type': 'tuition',
+            'university': uni_id,
+            'category': category,
+            'source_url': source_url,
+            'is_yaml_fact': True,
+        }
+        if valid_for:
+            metadata['valid_for'] = valid_for
+
         chunks.append({
             'content': "\n".join(lines),
-            'metadata': {
-                'source': f"facts/universities/{uni_id}.yaml",
-                'title': f"Стоимость {uni_name}",
-                'fact_type': 'tuition',
-                'university': uni_id,
-                'category': category,
-                'source_url': source_url,
-                'is_yaml_fact': True,
-            }
+            'metadata': metadata,
         })
 
     return chunks
@@ -408,17 +463,27 @@ def _extract_key_dates_chunks(data: dict, uni_id: str, uni_name: str) -> list[di
 
         source_url = key_dates.get('source_url', '')
 
+        # `key_dates_2026` keys (and the data they hold, e.g. semester_start
+        # 2026-10-01) describe admission for the WS2026/27 intake.
+        valid_for = _derive_valid_for(key_dates, semester='WS2026/27')
+        if valid_for:
+            lines.append(f"(актуально для приёма {valid_for})")
+
+        metadata = {
+            'source': f"facts/universities/{uni_id}.yaml",
+            'title': f"Ключевые даты {uni_name} 2026",
+            'fact_type': 'key_dates',
+            'university': uni_id,
+            'year': 2026,
+            'source_url': source_url,
+            'is_yaml_fact': True,
+        }
+        if valid_for:
+            metadata['valid_for'] = valid_for
+
         chunks.append({
             'content': "\n".join(lines),
-            'metadata': {
-                'source': f"facts/universities/{uni_id}.yaml",
-                'title': f"Ключевые даты {uni_name} 2026",
-                'fact_type': 'key_dates',
-                'university': uni_id,
-                'year': 2026,
-                'source_url': source_url,
-                'is_yaml_fact': True,
-            }
+            'metadata': metadata,
         })
 
     return chunks

@@ -1,7 +1,7 @@
 import re
 from typing import List
 
-from crag.simple_rag import Document
+from crag.simple_rag import Document, dedup_sources
 
 # Tags that Telegram's HTML ParseMode actually supports
 _TG_ALLOWED_TAGS = frozenset({
@@ -81,31 +81,23 @@ def web_doc_to_source_str(doc: Document) -> str:
 
 
 def docs_to_sources_str(documents: List[Document]) -> str:
-    seen_urls = set()
+    """Render a numbered, deduped sources list.
+
+    The ``[n]`` numbering matches ``crag.simple_rag.build_numbered_context``'s
+    ordering: both rely on ``dedup_sources`` (dedup by ``source_url``, else
+    ``source``, in first-seen order), so a citation ``[n]`` in the LLM's
+    context refers to the same source as ``[n]`` here.
+    """
+    ordered = dedup_sources(documents)
     source_text_rows = []
-    idx = 1
-    for doc in documents:
+    for idx, doc in enumerate(ordered, start=1):
         if "is_public" in doc.metadata:
-            link = doc.metadata["source"]
-            if link != "":
-                if link not in seen_urls:
-                    source_str = tg_message_to_source_str(doc)
-                    seen_urls.add(link)
-                else:
-                    continue
-            else:
-                source_str = tg_message_to_source_str(doc)
+            source_str = tg_message_to_source_str(doc)
         else:
-            # Deduplicate by source_url (real URL) or by source (filename)
-            dedup_key = doc.metadata.get("source_url", doc.metadata.get("source", ""))
-            if dedup_key in seen_urls:
-                continue
-            seen_urls.add(dedup_key)
             source_str = web_doc_to_source_str(doc)
 
         out_row = f"[{idx}] {source_str}"
         source_text_rows.append(out_row)
-        idx += 1
 
     sources_text = "\n".join(source_text_rows)
     return sources_text

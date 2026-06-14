@@ -121,6 +121,7 @@ tuition:
         amount: 25.20
     total: 751.92
     source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/financial-matters/tuition-fees-and-the-austrian-student-union-fee
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
   - category: eu
@@ -131,6 +132,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 25.20
+    source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/financial-matters/tuition-fees-and-the-austrian-student-union-fee
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
   - category: rwr_card
@@ -142,6 +145,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 25.20
+    source_url: https://www.tugraz.at/en/studying-and-teaching/studying-at-tu-graz/prospective-students/financial-matters/tuition-fees-and-the-austrian-student-union-fee
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
 # Вступительные экзамены

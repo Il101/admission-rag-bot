@@ -120,6 +120,10 @@ class PipelineContext:
     graded_docs: List[Any] = field(default_factory=list)
     reranked_docs: List[Any] = field(default_factory=list)
     context_str: str = ""
+    # Ordered, deduped list of source Documents — [n] in context_str and the
+    # rendered "Источники" list both index into this same ordering (see
+    # crag.simple_rag.build_numbered_context / bot.utils.docs_to_sources_str).
+    ordered_source_docs: List[Any] = field(default_factory=list)
 
     # Query classification / user scoping (used for cache gating + keying)
     query_type: Optional[Any] = None
@@ -424,7 +428,14 @@ class TagBoostStep(PipelineStep):
 
 
 class RerankStep(PipelineStep):
-    """Re-rank documents using LLM scoring."""
+    """Re-rank documents.
+
+    If an optional cross-encoder/API reranker is configured
+    (``crag.reranker.reranker_enabled()``), use it. Otherwise fall back to
+    the existing LLM-based re-ranking (``rag.arerank_documents``) with its
+    soft-timeout fallback. Reranking never raises — any failure falls back
+    to the graded order.
+    """
     name = "rerank"
 
     def __init__(self, top_k: int = 6):
@@ -435,7 +446,24 @@ class RerankStep(PipelineStep):
             ctx.reranked_docs = ctx.graded_docs
             return
 
+        from crag.reranker import reranker_enabled, rerank_documents
+
         t0 = time.monotonic()
+
+        if reranker_enabled():
+            try:
+                ctx.reranked_docs = await rerank_documents(
+                    ctx.rewritten_question, ctx.graded_docs, top_k=self.top_k
+                )
+            except Exception as e:
+                # rerank_documents never raises, but guard defensively anyway.
+                logger.warning(
+                    f"[User {ctx.tg_id}] Cross-encoder rerank failed, keeping graded order: {e}"
+                )
+                ctx.reranked_docs = ctx.graded_docs[: self.top_k]
+            ctx.timings["rerank"] = time.monotonic() - t0
+            return
+
         timeout = _get_rerank_soft_timeout_sec()
         if timeout > 0:
             try:
@@ -458,15 +486,21 @@ class RerankStep(PipelineStep):
 
 
 class BuildContextStep(PipelineStep):
-    """Build context string from documents."""
+    """Build the numbered context string and the shared source ordering.
+
+    Uses ``crag.simple_rag.build_numbered_context`` so that the ``[n]``
+    citation markers the LLM is instructed to use in its answer align
+    exactly with the ``[n]`` numbering in the "Источники" list rendered to
+    the user (via ``bot.utils.docs_to_sources_str(ctx.ordered_source_docs)``).
+    """
     name = "build_context"
 
     async def execute(self, ctx: PipelineContext, rag: Any) -> None:
-        from crag.simple_rag import documents_to_context_str
+        from crag.simple_rag import build_numbered_context
 
         docs = ctx.reranked_docs or ctx.graded_docs or ctx.retrieved_docs
         docs = apply_entity_grounding_guardrails(ctx.rewritten_question, docs)
-        ctx.context_str = documents_to_context_str(docs)
+        ctx.context_str, ctx.ordered_source_docs = build_numbered_context(docs)
 
 
 class GenerateStep(PipelineStep):
@@ -514,17 +548,32 @@ class GenerateStep(PipelineStep):
 
 
 class AssertionCheckStep(PipelineStep):
-    """Validate answer assertions against source categories.
+    """Faithfulness gate: verify the answer is grounded in retrieved facts.
 
-    Prevents cross-entity hallucinations by checking that answer claims
-    are grounded in sources from appropriate categories.
+    Runs an LLM-judge faithfulness check (``verify_faithfulness``) on
+    substantive RAG answers. If the judge flags unsupported claims, the
+    answer is regenerated ONCE with a stricter grounding instruction
+    (``rag.aregenerate_grounded``) and re-verified. If it's still not
+    faithful after the single regeneration attempt, a caution note is
+    appended so the user knows to double-check with the official source.
     """
     name = "assertion_check"
 
-    async def execute(self, ctx: PipelineContext, rag: Any) -> None:
-        from crag.assertion_validator import validate_answer_assertions, add_assertion_disclaimer
+    # Minimum answer length to bother running the (LLM-call) faithfulness
+    # check on — very short answers are usually error messages, greetings,
+    # or clarifying questions with little factual content to verify.
+    MIN_ANSWER_LEN = 50
 
-        # Only validate if we have both answer and sources
+    CAUTION_NOTE = (
+        "\n\n⚠️ Часть информации не удалось подтвердить источниками — "
+        "проверьте в официальном источнике."
+    )
+
+    async def execute(self, ctx: PipelineContext, rag: Any) -> None:
+        from crag.assertion_validator import verify_faithfulness
+        from bot.memory import get_current_date
+
+        # Only run for substantive RAG answers with retrieved/reranked docs.
         if not ctx.answer_json or not ctx.reranked_docs:
             return
 
@@ -533,36 +582,92 @@ class AssertionCheckStep(PipelineStep):
             answer_data = json.loads(ctx.answer_json)
             answer_text = answer_data.get("answer", ctx.answer_json)
         except json.JSONDecodeError:
+            answer_data = None
             answer_text = ctx.answer_json
 
-        # Skip if answer is too short (likely error message)
-        if len(answer_text) < 50:
+        # Skip if answer is too short (likely error message, greeting, or
+        # a clarifying question with no factual claims to verify).
+        if len(answer_text) < self.MIN_ANSWER_LEN:
             return
 
         t0 = time.monotonic()
-        result = await validate_answer_assertions(
+        result = await verify_faithfulness(
             answer_text,
             ctx.reranked_docs,
             ctx.rewritten_question or ctx.question,
-            llm_provider=None,  # Can pass rag.llm for advanced validation
+            llm_provider=getattr(rag, "llm_provider", None),
         )
         ctx.timings["assertion_check"] = time.monotonic() - t0
 
-        # If validation failed, add disclaimer
-        if not result.is_valid and result.warnings:
-            logger.warning(
-                f"[User {ctx.tg_id}] Assertion check failed: {'; '.join(result.warnings)}"
+        if result.is_faithful:
+            return
+
+        logger.warning(
+            f"[User {ctx.tg_id}] Faithfulness check failed: {result.reason} "
+            f"(claims: {result.unsupported_claims})"
+        )
+
+        # Single bounded regeneration attempt with a stricter grounding prompt.
+        t1 = time.monotonic()
+        regenerated_json = await rag.aregenerate_grounded(
+            ctx.rewritten_question or ctx.question,
+            ctx.context_str,
+            ctx.memory_context,
+            ctx.chat_history,
+            get_current_date(),
+        )
+        ctx.timings["assertion_regenerate"] = time.monotonic() - t1
+
+        try:
+            regenerated_data = json.loads(regenerated_json)
+            regenerated_text = regenerated_data.get("answer", regenerated_json)
+        except json.JSONDecodeError:
+            regenerated_data = None
+            regenerated_text = regenerated_json
+
+        if not regenerated_text or len(regenerated_text) < self.MIN_ANSWER_LEN:
+            # Regeneration failed/returned something unusable — keep the
+            # original answer but add a caution note.
+            self._set_answer_with_caution(ctx, answer_data, answer_text)
+            return
+
+        # Re-verify the regenerated answer once.
+        t2 = time.monotonic()
+        recheck = await verify_faithfulness(
+            regenerated_text,
+            ctx.reranked_docs,
+            ctx.rewritten_question or ctx.question,
+            llm_provider=getattr(rag, "llm_provider", None),
+        )
+        ctx.timings["assertion_recheck"] = time.monotonic() - t2
+
+        if recheck.is_faithful:
+            ctx.answer_json = regenerated_json
+            logger.info(f"[User {ctx.tg_id}] Regenerated answer passed faithfulness re-check")
+            return
+
+        # Still not faithful after one regeneration — bound retries to a
+        # single attempt; use the regenerated (stricter) answer but add a
+        # caution note for the user.
+        logger.warning(
+            f"[User {ctx.tg_id}] Regenerated answer still not faithful: "
+            f"{recheck.reason} (claims: {recheck.unsupported_claims})"
+        )
+        self._set_answer_with_caution(ctx, regenerated_data, regenerated_text)
+
+    def _set_answer_with_caution(
+        self, ctx: PipelineContext, answer_data: Optional[dict], answer_text: str
+    ) -> None:
+        """Append the caution note to the answer text and update ctx.answer_json."""
+        answer_with_caution = answer_text + self.CAUTION_NOTE
+        if answer_data and isinstance(answer_data, dict):
+            answer_data["answer"] = answer_with_caution
+            ctx.answer_json = json.dumps(answer_data, ensure_ascii=False)
+        else:
+            ctx.answer_json = json.dumps(
+                {"answer": answer_with_caution, "suggested_questions": []},
+                ensure_ascii=False,
             )
-
-            # Add disclaimer to answer
-            answer_with_disclaimer = add_assertion_disclaimer(answer_text, result.warnings)
-
-            # Update answer in JSON
-            if answer_data and isinstance(answer_data, dict):
-                answer_data["answer"] = answer_with_disclaimer
-                ctx.answer_json = json.dumps(answer_data, ensure_ascii=False)
-            else:
-                ctx.answer_json = answer_with_disclaimer
 
 
 class CacheStoreStep(PipelineStep):

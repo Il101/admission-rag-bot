@@ -16,8 +16,10 @@ Built to reduce volunteer workload during university admission season. Handles F
 
 **Technical highlights:**
 - An intent-router-driven RAG pipeline with **strict grounding** — it answers only from retrieved context and gives an honest "no answer" when nothing relevant is found
-- Hybrid retrieval (dense pgvector + PostgreSQL full-text), LLM-based document grading, optional reranking, and HyDE for narrative queries
-- Semantic answer caching (profile-scoped, skipped for fact lookups) and an intent/query router (fact vs. narrative vs. tool-based questions)
+- **Source citations**: every factual statement is tagged with a `[n]` marker and the answer ends with a deduplicated source list built from the actually-retrieved facts (no model-invented URLs)
+- **Faithfulness gate**: an LLM-judge verifies the answer against its sources and triggers a single bounded regeneration (or a caution) when a claim isn't supported
+- Hybrid retrieval (dense pgvector + PostgreSQL full-text), LLM-based document grading, optional **cross-encoder reranking** (Cohere / Jina / NVIDIA), and HyDE for narrative queries
+- **Effective-dated facts**: time-sensitive facts carry a `valid_for` academic year and a `source_url`, surfaced as "актуально для приёма 2026/27" with escalation to the official source for high-stakes topics
 - Pluggable LLM/embedding providers (Google Gemini, OpenAI, NVIDIA / OpenAI-compatible APIs) via environment variables
 
 ## ✨ Features
@@ -32,6 +34,16 @@ Built to reduce volunteer workload during university admission season. Handles F
 - **Semantic answer cache**: caches answers keyed by question-embedding similarity and scoped by user profile; skipped for fact-type questions so a near-duplicate question about a different university/category never reuses a stale answer
 - **Query router**: classifies questions as fact (structured YAML data), narrative (markdown guides), tool-based, or chit-chat, and routes them accordingly
 - **KB-backed tools**: budget and date calculations and personal-progress lookups; tool data is read from the `facts/` knowledge base, not hardcoded
+
+### 🛡 Reliability & Trust
+
+Designed for a high-stakes domain (deadlines, fees, visas) where a wrong answer is costly. Five layers reduce hallucination:
+
+1. **Strict grounding** — generation runs only over retrieved context; if document grading filters everything out, the bot returns an honest "no relevant information found" instead of guessing. Internal reasoning steps (grading, reranking, rewriting) run at temperature 0.
+2. **Source citations** — context facts are numbered, the model must cite the `[n]` it used, and the bot appends a deduplicated "📎 Источники" list built from the real retrieved documents (`crag/simple_rag.py::build_numbered_context` + `bot/utils.py::docs_to_sources_str` share one numbering).
+3. **Faithfulness verification** — after generation, `verify_faithfulness` (LLM-judge, temperature 0) checks every claim against the sources; unsupported claims trigger one stricter regeneration, then a visible caution if still unverified (`crag/assertion_validator.py`, `AssertionCheckStep`).
+4. **Cross-encoder reranking** — optional dedicated rerank API (Cohere / Jina / NVIDIA) for sharper top-k ordering, with graceful fallback to the built-in LLM reranker when unconfigured (`crag/reranker.py`).
+5. **Effective-dated, KB-backed facts** — time-sensitive facts carry `valid_for` + `source_url`; tools read from `facts/` rather than hardcoded values, and high-stakes answers escalate to the official source when data is missing or may be outdated.
 
 ### 🔍 Hybrid Search
 - **Dense vector search**: semantic search over embeddings stored in pgvector
@@ -66,8 +78,9 @@ Query → Intent Router (RAG / tool+RAG / personal / chitchat)
       → Query Rewriting  (+ HyDE for narrative queries only)
       → Hybrid Retrieval (pgvector similarity + PostgreSQL full-text search)
       → LLM Document Grading (batch relevance scoring)
-      → [optional] Reranking + domain-tag boosting
-      → Context build → answer generation → post-generation guardrails
+      → [optional] Cross-encoder reranking + domain-tag boosting
+      → Numbered context build → answer generation (with [n] citations)
+      → Faithfulness check → regenerate once if unsupported → append sources
 ```
 
 **Strict grounding:** if grading finds no relevant documents, the pipeline stops and returns an honest "no relevant information found" message instead of answering from the model's own knowledge. Internal reasoning steps (grading, reranking, rewriting) run at temperature 0 for stability.
@@ -199,11 +212,12 @@ admission-rag-bot/
 │   ├── llm_providers.py   # LLM/embedding provider abstraction (Google, OpenAI, NVIDIA)
 │   ├── query_router.py    # Fact vs. narrative query classification
 │   ├── router.py          # Intent routing (tool / RAG / chitchat)
-│   ├── pipeline.py        # Pipeline steps and guardrails
+│   ├── reranker.py        # Optional cross-encoder rerank API (Cohere/Jina/NVIDIA)
+│   ├── pipeline.py        # Pipeline steps + grounding/citation/faithfulness guardrails
 │   ├── yaml_facts_indexer.py  # Indexes facts/*.yaml into pgvector
 │   ├── parent_child_chunking.py  # Optional parent-child chunk generation
 │   ├── tag_set_layer.py   # Domain tag boosting for retrieval
-│   ├── assertion_validator.py  # Post-generation cross-entity checks
+│   ├── assertion_validator.py  # Faithfulness verification (LLM-judge)
 │   ├── ab_testing.py      # A/B testing helpers
 │   ├── observability.py   # Langfuse tracing helpers
 │   └── tools.py           # Tool-calling implementations

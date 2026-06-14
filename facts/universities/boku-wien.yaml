@@ -120,6 +120,7 @@ tuition:
         amount: 25.20
     total: 751.92
     source_url: https://boku.ac.at/studienservices/studienorganisation/beitraege
+    valid_for: "2026/27"
 
   - category: eu
     amount: 0
@@ -129,6 +130,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 25.20
+    source_url: https://boku.ac.at/studienservices/studienorganisation/beitraege
+    valid_for: "2026/27"
 
 # Подача документов
 submission:

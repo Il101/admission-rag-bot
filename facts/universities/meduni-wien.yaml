@@ -237,6 +237,7 @@ tuition:
         amount: 25.20
     total: 751.92
     source_url: https://www.meduniwien.ac.at/web/en/studies-further-education/application-admission/tuition-fees/
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
   - category: eu_over_time
@@ -248,6 +249,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 388.56
+    source_url: https://www.meduniwien.ac.at/web/en/studies-further-education/application-admission/tuition-fees/
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
   - category: eu_in_time
@@ -258,6 +261,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 25.20
+    source_url: https://www.meduniwien.ac.at/web/en/studies-further-education/application-admission/tuition-fees/
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
   - category: ukraine
@@ -268,6 +273,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 25.20
+    source_url: https://www.meduniwien.ac.at/web/en/studies-further-education/application-admission/tuition-fees/
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
   - category: ldc_countries
@@ -277,6 +284,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 25.20
+    source_url: https://www.meduniwien.ac.at/web/en/studies-further-education/application-admission/tuition-fees/
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
 # Подготовка к MedAT

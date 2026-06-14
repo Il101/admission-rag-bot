@@ -116,6 +116,7 @@ tuition:
         amount: 25.20
     total: 751.92
     source_url: https://www.uibk.ac.at/studium/organisation/kosten-foerderungen/
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
   - category: eu
@@ -126,6 +127,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 25.20
+    source_url: https://www.uibk.ac.at/studium/organisation/kosten-foerderungen/
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
   - category: rwr_card
@@ -137,6 +140,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 25.20
+    source_url: https://www.uibk.ac.at/studium/organisation/kosten-foerderungen/
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
   - category: ukraine
@@ -147,6 +152,8 @@ tuition:
       - name: ÖH-Beitrag
         amount: 25.20
     total: 25.20
+    source_url: https://www.uibk.ac.at/studium/organisation/kosten-foerderungen/
+    valid_for: "2026/27"
     last_verified: 2026-03-01
 
 # Вступительные экзамены
