@@ -170,6 +170,62 @@ def _postprocess_answer_text(text: str) -> str:
     return text
 
 
+# Matches citation markers like [1], [2, 3], [1][2] in the answer text.
+_CITATION_MARKER_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+
+
+def _extract_cited_numbers(text: str) -> set[int]:
+    """Extract the set of source numbers cited via [n] markers in the answer text."""
+    cited: set[int] = set()
+    for match in _CITATION_MARKER_RE.findall(text or ""):
+        for part in match.split(","):
+            part = part.strip()
+            if part.isdigit():
+                cited.add(int(part))
+    return cited
+
+
+def _append_sources_block(clean_text: str, source_docs: list) -> str:
+    """Append a "📎 Источники:" block built from the actually-retrieved docs.
+
+    The [n] numbering matches ``crag.simple_rag.build_numbered_context`` /
+    ``docs_to_sources_str`` (both dedup via ``dedup_sources``), so [n] in the
+    answer text refers to the same source as [n] here.
+
+    Lists only the sources actually cited (via [n] markers) in the answer
+    text. If no [n] markers were found, falls back to listing all provided
+    sources (better to show provenance than nothing). If there are no
+    sources at all, returns the text unchanged.
+    """
+    if not source_docs:
+        return clean_text
+
+    all_sources_text = docs_to_sources_str(source_docs)
+    if not all_sources_text.strip():
+        return clean_text
+
+    cited_numbers = _extract_cited_numbers(clean_text)
+
+    if cited_numbers:
+        lines = [
+            line for line in all_sources_text.splitlines()
+            if line.strip()
+        ]
+        cited_lines = []
+        for line in lines:
+            m = re.match(r"^\[(\d+)\]", line.strip())
+            if m and int(m.group(1)) in cited_numbers:
+                cited_lines.append(line)
+        sources_text = "\n".join(cited_lines) if cited_lines else all_sources_text
+    else:
+        sources_text = all_sources_text
+
+    if not sources_text.strip():
+        return clean_text
+
+    return clean_text + "\n\n📎 Источники:\n" + sources_text
+
+
 def _apply_confirmed_fact_guardrails(text: str, memory: dict | None) -> str:
     """Downgrade unconfirmed 'already done' claims to neutral wording."""
     if not text:
@@ -770,10 +826,13 @@ async def _handle_question_with_router(
         clean_text = _postprocess_answer_text(clean_text)
         clean_text = _apply_confirmed_fact_guardrails(clean_text, memory)
 
-        docs = ctx.reranked_docs or ctx.graded_docs or ctx.retrieved_docs or []
-        sources_text = docs_to_sources_str(docs) if docs else ""
-        if sources_text:
-            clean_text += "\n\nИсточники:\n" + sources_text
+        # Citations: ctx.ordered_source_docs is the single, deduped, [n]-numbered
+        # ordering shared with the context the LLM saw (see
+        # crag.simple_rag.build_numbered_context). Fall back to the reranked/
+        # graded/retrieved docs (unnumbered) for paths that bypass BuildContextStep
+        # (e.g. semantic cache hits).
+        source_docs = ctx.ordered_source_docs or ctx.reranked_docs or ctx.graded_docs or ctx.retrieved_docs or []
+        clean_text = _append_sources_block(clean_text, source_docs)
 
         safe_text = sanitize_telegram_html(clean_text)
         keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None

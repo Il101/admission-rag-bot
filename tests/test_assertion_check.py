@@ -4,9 +4,13 @@ Validates that the assertion check correctly identifies category mismatches
 and prevents cross-entity hallucinations.
 """
 
+import json
+
 import pytest
 from crag.assertion_validator import (
     validate_answer_assertions,
+    verify_faithfulness,
+    FaithfulnessResult,
     _detect_answer_topic,
     _extract_entity_types_from_docs,
     _check_source_category_match,
@@ -17,9 +21,29 @@ from crag.assertion_validator import (
 class MockDocument:
     """Mock document for testing."""
 
-    def __init__(self, content: str, entity_type: str):
+    def __init__(self, content: str, entity_type: str = "general"):
         self.page_content = content
         self.metadata = {"entity_type": entity_type}
+
+
+class MockLLMProvider:
+    """Mock LLM provider whose ``generate`` returns a fixed response (or raises)."""
+
+    def __init__(self, response: str = None, raise_error: bool = False):
+        self.response = response
+        self.raise_error = raise_error
+        self.last_kwargs = None
+
+    async def generate(self, prompt: str, system_prompt=None, temperature: float = 0.0, **kwargs):
+        self.last_kwargs = {
+            "prompt": prompt,
+            "system_prompt": system_prompt,
+            "temperature": temperature,
+            **kwargs,
+        }
+        if self.raise_error:
+            raise RuntimeError("simulated LLM failure")
+        return self.response
 
 
 @pytest.mark.asyncio
@@ -176,6 +200,124 @@ async def test_finance_topic_with_language_sources():
     assert not result.is_valid
     assert "finance" in result.warnings[0].lower()
     assert "language" in result.warnings[0].lower()
+
+
+# ── verify_faithfulness (LLM judge faithfulness gate) ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_faithful_answer_is_faithful():
+    """A faithful answer (judge says is_faithful=True) -> is_faithful True, no claims."""
+    question = "Какой дедлайн подачи в TU Wien?"
+    answer = "Дедлайн подачи в TU Wien — 5 сентября 2026 года [1]."
+    docs = [MockDocument("TU Wien: дедлайн подачи документов — 5 сентября 2026 года.")]
+
+    llm = MockLLMProvider(response=json.dumps({
+        "is_faithful": True,
+        "unsupported_claims": [],
+    }))
+
+    result = await verify_faithfulness(answer, docs, question, llm_provider=llm)
+
+    assert isinstance(result, FaithfulnessResult)
+    assert result.is_faithful is True
+    assert result.unsupported_claims == []
+
+
+@pytest.mark.asyncio
+async def test_answer_with_invented_claim_is_not_faithful():
+    """An answer with an unsupported invented claim -> is_faithful False, claim listed."""
+    question = "Какой дедлайн подачи в TU Wien?"
+    answer = (
+        "Дедлайн подачи в TU Wien — 5 сентября 2026 года [1]. "
+        "Также нужно оплатить регистрационный взнос в размере 500 евро."
+    )
+    docs = [MockDocument("TU Wien: дедлайн подачи документов — 5 сентября 2026 года.")]
+
+    invented_claim = "Регистрационный взнос составляет 500 евро"
+    llm = MockLLMProvider(response=json.dumps({
+        "is_faithful": False,
+        "unsupported_claims": [invented_claim],
+    }))
+
+    result = await verify_faithfulness(answer, docs, question, llm_provider=llm)
+
+    assert result.is_faithful is False
+    assert invented_claim in result.unsupported_claims
+
+
+@pytest.mark.asyncio
+async def test_llm_error_fails_open():
+    """LLM error during the judge call -> fail-open (is_faithful=True)."""
+    question = "Какой дедлайн подачи в TU Wien?"
+    answer = "Дедлайн подачи в TU Wien — 5 сентября 2026 года [1]."
+    docs = [MockDocument("TU Wien: дедлайн подачи документов — 5 сентября 2026 года.")]
+
+    llm = MockLLMProvider(raise_error=True)
+
+    result = await verify_faithfulness(answer, docs, question, llm_provider=llm)
+
+    assert result.is_faithful is True
+
+
+@pytest.mark.asyncio
+async def test_unparseable_judge_response_fails_open():
+    """Malformed/non-JSON judge response -> fail-open (is_faithful=True)."""
+    question = "Какой дедлайн подачи в TU Wien?"
+    answer = "Дедлайн подачи в TU Wien — 5 сентября 2026 года [1]."
+    docs = [MockDocument("TU Wien: дедлайн подачи документов — 5 сентября 2026 года.")]
+
+    llm = MockLLMProvider(response="this is not json at all")
+
+    result = await verify_faithfulness(answer, docs, question, llm_provider=llm)
+
+    assert result.is_faithful is True
+
+
+@pytest.mark.asyncio
+async def test_no_llm_provider_fails_open():
+    """No llm_provider given -> fail-open (is_faithful=True), no LLM call made."""
+    question = "Какой дедлайн подачи в TU Wien?"
+    answer = "Дедлайн подачи в TU Wien — 5 сентября 2026 года [1]."
+    docs = [MockDocument("TU Wien: дедлайн подачи документов — 5 сентября 2026 года.")]
+
+    result = await verify_faithfulness(answer, docs, question, llm_provider=None)
+
+    assert result.is_faithful is True
+
+
+@pytest.mark.asyncio
+async def test_empty_context_fails_open():
+    """No documents/context to check against -> fail-open (is_faithful=True)."""
+    question = "Какой дедлайн подачи в TU Wien?"
+    answer = "Дедлайн подачи в TU Wien — 5 сентября 2026 года [1]."
+
+    llm = MockLLMProvider(response=json.dumps({
+        "is_faithful": False,
+        "unsupported_claims": ["Дедлайн подачи в TU Wien — 5 сентября 2026 года"],
+    }))
+
+    result = await verify_faithfulness(answer, [], question, llm_provider=llm)
+
+    assert result.is_faithful is True
+
+
+@pytest.mark.asyncio
+async def test_judge_called_at_temperature_zero():
+    """The judge LLM call must use temperature=0 for deterministic verdicts."""
+    question = "Какой дедлайн подачи в TU Wien?"
+    answer = "Дедлайн подачи в TU Wien — 5 сентября 2026 года [1]."
+    docs = [MockDocument("TU Wien: дедлайн подачи документов — 5 сентября 2026 года.")]
+
+    llm = MockLLMProvider(response=json.dumps({
+        "is_faithful": True,
+        "unsupported_claims": [],
+    }))
+
+    await verify_faithfulness(answer, docs, question, llm_provider=llm)
+
+    assert llm.last_kwargs is not None
+    assert llm.last_kwargs["temperature"] == 0.0
 
 
 if __name__ == "__main__":

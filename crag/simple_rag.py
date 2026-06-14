@@ -200,6 +200,37 @@ class Document:
     metadata: dict
 
 
+def source_dedup_key(doc: "Document") -> str:
+    """Return the dedup key for a document's source.
+
+    Prefers ``source_url`` (real URL) and falls back to ``source``
+    (e.g. a facts file path). Used to build a single, consistent
+    ordering of unique sources shared between the context the LLM
+    sees and the sources list shown to the user.
+    """
+    metadata = getattr(doc, "metadata", {}) or {}
+    return metadata.get("source_url") or metadata.get("source") or ""
+
+
+def dedup_sources(docs: List[Document]) -> List[Document]:
+    """Return one representative Document per unique source, in first-seen order.
+
+    Documents without any identifiable source (empty dedup key) are each
+    kept as their own entry (never deduped against each other), so they
+    still receive their own number in the shared ordering.
+    """
+    seen = set()
+    result = []
+    for doc in docs:
+        key = source_dedup_key(doc)
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        result.append(doc)
+    return result
+
+
 def documents_to_context_str(docs: List[Document]) -> str:
     """Convert documents to context string with source attribution."""
     parts = []
@@ -224,6 +255,66 @@ def documents_to_context_str(docs: List[Document]) -> str:
             parts.append(doc.page_content)
 
     return "\n\n".join(parts)
+
+
+def build_numbered_context(docs: List[Document]) -> tuple[str, List[Document]]:
+    """Build a numbered context string and the shared source ordering.
+
+    Each unique source (deduped by :func:`source_dedup_key`, in first-seen
+    order) is assigned a number ``[n]``. Every fact block in the returned
+    context string is prefixed with the ``[n]`` of its source, along with
+    title/validity attribution, e.g.::
+
+        [1] (TU Wien — актуально для приёма 2026/27)
+        <fact content>
+
+    The returned ``ordered_sources`` list (one Document per unique source,
+    in the SAME order as the ``[n]`` numbering used in the context) MUST be
+    passed to ``bot.utils.docs_to_sources_str`` so the rendered "Источники"
+    list uses identical numbering to the citations the model is instructed
+    to use.
+
+    Returns:
+        (numbered_context_str, ordered_sources)
+    """
+    ordered_sources = dedup_sources(docs)
+    # Map each doc's dedup key -> its [n] number (1-indexed, in ordered_sources order)
+    number_by_key: dict[str, int] = {}
+    for i, doc in enumerate(ordered_sources, start=1):
+        number_by_key[source_dedup_key(doc)] = i
+
+    # Fallback numbering for docs whose key isn't in ordered_sources (shouldn't
+    # normally happen since dedup_sources keeps every doc with an empty key,
+    # but guards against any future edge case).
+    fallback_counter = len(ordered_sources)
+
+    parts = []
+    for doc in docs:
+        key = source_dedup_key(doc)
+        number = number_by_key.get(key)
+        if number is None:
+            fallback_counter += 1
+            number = fallback_counter
+
+        title = doc.metadata.get("title", doc.metadata.get("source", ""))
+        section = doc.metadata.get("section_path", "")
+        valid_for = doc.metadata.get("valid_for", "")
+
+        header_parts = []
+        if title:
+            header_parts.append(str(title))
+        if section:
+            header_parts.append(str(section))
+        if valid_for:
+            header_parts.append(f"актуально для приёма {valid_for}")
+
+        header = " — ".join(header_parts)
+        if header:
+            parts.append(f"[{number}] ({header})\n{doc.page_content}")
+        else:
+            parts.append(f"[{number}]\n{doc.page_content}")
+
+    return "\n\n".join(parts), ordered_sources
 
 
 # ── Retry helper ─────────────────────────────────────────────────────────
@@ -1030,6 +1121,74 @@ class SimpleRAG:
                     ),
                     "suggested_questions": [],
                 }
+            )
+
+    # ── Grounded regeneration (faithfulness gate) ─────────────────────────
+
+    async def aregenerate_grounded(
+        self,
+        question: str,
+        context_str: str,
+        memory_context: str,
+        chat_history: str,
+        current_date: str,
+    ) -> str:
+        """Regenerate the answer with a stricter grounding instruction.
+
+        Used by ``AssertionCheckStep`` when ``verify_faithfulness`` flags the
+        first answer as containing unsupported claims. This is a single,
+        non-streamed, low-temperature call that re-uses the normal RAG
+        prompts but appends an extra instruction forcing the model to rely
+        ONLY on the provided context and to keep citation markers.
+
+        Returns:
+            Raw answer JSON text (same shape as ``astream_answer``'s output:
+            ``{"answer": "...", "suggested_questions": [...]}``). On error,
+            returns a safe fallback JSON string.
+        """
+        sys_prompt = _render_template(
+            self.system_prompt, current_date=current_date
+        )
+        sys_prompt += (
+            "\n\n═══ ПОВТОРНАЯ ГЕНЕРАЦИЯ (СТРОГИЙ РЕЖИМ) ═══\n"
+            "Предыдущий ответ содержал утверждения, не подтверждённые "
+            "контекстом из базы знаний. Сформулируй ответ ЗАНОВО, используя "
+            "ИСКЛЮЧИТЕЛЬНО факты из раздела «Контекст из базы знаний» ниже. "
+            "Убери любые утверждения (даты, цифры, названия, требования), "
+            "которые НЕ подтверждены этим контекстом. Если после удаления "
+            "неподтверждённых утверждений ответ становится неполным — честно "
+            "скажи, что точной информации по этой части нет, и предложи "
+            "проверить в официальном источнике. Сохраняй ссылки на источники "
+            "в формате [n], используя ТОЛЬКО номера, присутствующие в контексте."
+        )
+
+        user_prompt = _render_template(
+            self.human_prompt_template,
+            question=question,
+            memory_context=memory_context,
+            chat_history=chat_history,
+            context=context_str,
+        )
+
+        try:
+            response_text = await retry_on_503(
+                self.llm_provider.generate,
+                prompt=user_prompt,
+                system_prompt=sys_prompt,
+                temperature=0.0,
+            )
+            return response_text or ""
+        except Exception as e:
+            logger.error(f"Error during grounded regeneration: {e}")
+            return json.dumps(
+                {
+                    "answer": (
+                        "Извините, произошла ошибка при генерации ответа. "
+                        "Пожалуйста, попробуйте еще раз через минуту."
+                    ),
+                    "suggested_questions": [],
+                },
+                ensure_ascii=False,
             )
 
     # ── Semantic answer cache ────────────────────────────────────────────
