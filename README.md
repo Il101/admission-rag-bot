@@ -15,22 +15,23 @@ An intelligent Telegram bot built with **Retrieval-Augmented Generation (RAG)** 
 Built to reduce volunteer workload during university admission season. Handles FAQ about applications, visa processes, housing, and student life — so volunteers can focus on complex individual cases.
 
 **Technical highlights:**
-- A single, feature-rich RAG pipeline (`SimpleRAG`) combining dense vector search with PostgreSQL full-text search
-- Query rewriting, LLM-based document grading, optional reranking, and HyDE (Hypothetical Document Embeddings)
-- Semantic answer caching and an intent/query router (fact vs. narrative vs. tool-based questions)
+- An intent-router-driven RAG pipeline with **strict grounding** — it answers only from retrieved context and gives an honest "no answer" when nothing relevant is found
+- Hybrid retrieval (dense pgvector + PostgreSQL full-text), LLM-based document grading, optional reranking, and HyDE for narrative queries
+- Semantic answer caching (profile-scoped, skipped for fact lookups) and an intent/query router (fact vs. narrative vs. tool-based questions)
 - Pluggable LLM/embedding providers (Google Gemini, OpenAI, NVIDIA / OpenAI-compatible APIs) via environment variables
 
 ## ✨ Features
 
-### 🤖 RAG Pipeline (SimpleRAG)
+### 🤖 RAG Pipeline
+- **Strict grounding**: answers only from retrieved context; returns an honest "no relevant information found" instead of fabricating when grading filters out all documents
 - **Hybrid retrieval**: dense vector similarity search (pgvector) combined with PostgreSQL native full-text search ("BM25-like" ranking)
-- **Query rewriting**: automatic reformulation of queries that don't retrieve relevant results
+- **Query rewriting**: automatic reformulation of the query before retrieval (anaphora resolution, keyword enrichment)
 - **LLM-based document grading**: batch relevance scoring of retrieved chunks before they're used in the answer
-- **HyDE**: generates a hypothetical answer to improve retrieval for hard queries
-- **Optional reranking** of retrieved documents
-- **Semantic answer cache**: caches full answers keyed by embedding similarity of the question, skipping the full pipeline on near-duplicate questions
+- **HyDE**: generates a hypothetical document to improve retrieval for narrative queries (disabled for fact lookups to avoid biasing factual retrieval)
+- **Optional reranking** of retrieved documents, plus domain-tag boosting
+- **Semantic answer cache**: caches answers keyed by question-embedding similarity and scoped by user profile; skipped for fact-type questions so a near-duplicate question about a different university/category never reuses a stale answer
 - **Query router**: classifies questions as fact (structured YAML data), narrative (markdown guides), tool-based, or chit-chat, and routes them accordingly
-- **Tool calling**: lets the LLM call tools (e.g., for deterministic lookups) in addition to retrieval
+- **KB-backed tools**: budget and date calculations and personal-progress lookups; tool data is read from the `facts/` knowledge base, not hardcoded
 
 ### 🔍 Hybrid Search
 - **Dense vector search**: semantic search over embeddings stored in pgvector
@@ -57,19 +58,19 @@ Built to reduce volunteer workload during university admission season. Handles F
 
 ### RAG Pipeline
 
-The live implementation is the `SimpleRAG` class (`crag/simple_rag.py`), which combines several techniques into a single pipeline:
+The live request flow is an intent **router** (`crag/router.py`) feeding a step-based **pipeline** (`crag/pipeline.py`) that orchestrates the retrieval/grading/generation operations implemented in `SimpleRAG` (`crag/simple_rag.py`):
 
 ```
-Query → Query Router (fact / narrative / tool / chitchat)
-      → [optional] Query Rewriting / HyDE
+Query → Intent Router (RAG / tool+RAG / personal / chitchat)
+      → Semantic answer-cache check (skipped for fact lookups)
+      → Query Rewriting  (+ HyDE for narrative queries only)
       → Hybrid Retrieval (pgvector similarity + PostgreSQL full-text search)
       → LLM Document Grading (batch relevance scoring)
-      → [optional] Reranking
-      → Semantic Cache check
-      → LLM → Answer
+      → [optional] Reranking + domain-tag boosting
+      → Context build → answer generation → post-generation guardrails
 ```
 
-If no relevant documents are found, the pipeline can rewrite the query and retry retrieval (bounded number of attempts) before falling back to a "no answer found" message.
+**Strict grounding:** if grading finds no relevant documents, the pipeline stops and returns an honest "no relevant information found" message instead of answering from the model's own knowledge. Internal reasoning steps (grading, reranking, rewriting) run at temperature 0 for stability.
 
 ### Technology Stack
 
@@ -189,9 +190,10 @@ defaults:
 ```
 admission-rag-bot/
 ├── bot/                   # Telegram bot implementation
-│   ├── handlers/          # Command handlers (rag, management, onboarding, ...)
-│   ├── middlewares/        # Bot middlewares
-│   └── filters/            # Message filters
+│   ├── handlers/          # Command/callback handlers (rag, management, onboarding, ...)
+│   ├── db.py              # SQLAlchemy (async) models and queries
+│   ├── memory.py          # Per-user journey state and conversation memory
+│   └── app.py             # Bot entrypoint and handler registration
 ├── crag/                  # RAG pipeline implementation
 │   ├── simple_rag.py      # SimpleRAG: hybrid retrieval, grading, HyDE, caching
 │   ├── llm_providers.py   # LLM/embedding provider abstraction (Google, OpenAI, NVIDIA)
