@@ -128,13 +128,6 @@ python3 bot/app.py
 
 ## 📚 Дополнительная информация
 
-Детальное описание всех фич: [RAG_IMPROVEMENTS.md](./RAG_IMPROVEMENTS.md)
-
-## ✨ Готово!
-
-После выполнения этих шагов ваш бот будет использовать все улучшения:
-- ✅ Assertion Check
-- ✅ Tag-Set Layer
-- ✅ Parent-Child Chunking (опционально)
-
-Качество ответов должно улучшиться на 15-20% 🚀
+- Обзор архитектуры и стека — [README.md](./README.md)
+- Переиндексация базы знаний — [docs/REINDEX_KB.md](./docs/REINDEX_KB.md)
+- Настройка LLM-провайдеров — [docs/LLM_PROVIDERS.md](./docs/LLM_PROVIDERS.md)

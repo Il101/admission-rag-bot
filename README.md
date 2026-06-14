@@ -109,7 +109,7 @@ cd admission-rag-bot
 
 2. **Configure environment**
 ```bash
-cp example.env .env
+cp .env.example .env
 # Edit .env with your settings:
 # - TGBOT_TOKEN: Your Telegram bot token
 # - GOOGLE_API_KEY (default provider) or OPENAI_API_KEY / NVIDIA_API_KEY

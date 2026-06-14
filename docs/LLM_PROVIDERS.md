@@ -80,9 +80,9 @@ OPENAI_BASE_URL=https://api.openai.com/v1  # опционально
 
 ## 🔀 Как переключить провайдера
 
-Скопируй `example.env` в `.env` и измени переменные провайдера:
+Скопируй `.env.example` в `.env` и измени переменные провайдера:
 ```bash
-cp example.env .env
+cp .env.example .env
 nano .env  # или vim, code, etc.
 ```
 
