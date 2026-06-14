@@ -42,8 +42,8 @@ Built to reduce volunteer workload during university admission season. Handles F
 - **OpenAI-compatible APIs**: OpenAI, NVIDIA, OpenRouter and similar providers, selected via `LLM_PROVIDER`
 - Switching providers is done via environment variables (see `docs/LLM_PROVIDERS.md`), not via Hydra config groups
 
-### 🇺🇦 Multilingual Support
-- Knowledge base facts and prompts support multiple languages (Russian/Ukrainian/German/English)
+### 🌐 Multilingual Support
+- Knowledge base facts and prompts mix Russian, German and English source material
 - LLM-based answer generation handles the user's language directly — no separate local translation/embedding models are used
 
 ### 🛠 Production-Ready

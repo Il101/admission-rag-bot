@@ -8,7 +8,7 @@ version = "2024.0.1"
 authors = [
     {name = "Ilia Zharikov", email = "ilia.zharikov.dev@gmail.com"},
 ]
-description = "Ukrainian Telegram bot powered by Conditional RAG for first-year student"
+description = "Telegram bot powered by Conditional RAG for first-year students applying to Austrian universities"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
 readme = "README.md"
