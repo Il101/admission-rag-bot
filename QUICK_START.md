@@ -27,7 +27,7 @@ python3 -m init_scripts.index_knowledge_base
 
 ```bash
 # Бот автоматически использует новые фичи
-python3 -m bot.main
+python3 bot/app.py
 ```
 
 ## ✅ Что происходит автоматически
@@ -122,8 +122,8 @@ python3 -m init_scripts.index_knowledge_base
 # Проверьте логи на наличие "Adding domain tags to chunks..."
 
 # Перезапустите бота полностью
-pkill -f "python3 -m bot.main"
-python3 -m bot.main
+pkill -f "python3 bot/app.py"
+python3 bot/app.py
 ```
 
 ## 📚 Дополнительная информация

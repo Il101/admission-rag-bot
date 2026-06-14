@@ -197,7 +197,7 @@ cities:
     last_verified: 2026-03-01
 ```
 
-### Process Facts (`facts/processes/*.yaml`)
+### Process Facts (`facts/processes/*.yaml`) — schema reserved, not yet populated
 
 ```yaml
 # Пример: visa-d.yaml
