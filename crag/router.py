@@ -50,7 +50,10 @@ PERSONAL_PROGRESS_PATTERNS = [
     r"мо(й|и|я) (данные|информаци|универ|город)",
 ]
 
-# Deadline/budget calculation patterns (TOOL_ONLY: check_deadline, calculate_budget)
+# Deadline/budget/date-math patterns.
+# - Deadline questions → RAG_ONLY (deadlines live in facts/, no tool).
+# - Budget questions → TOOL_THEN_RAG (calculate_budget result injected into generation).
+# - Date-math questions → TOOL_ONLY (calculate_days_until).
 CALCULATOR_PATTERNS = [
     r"(дедлайн|срок|deadline).*(подач|когда|для|на)",
     r"когда.*(подавать|подать|дедлайн|срок)",
@@ -62,7 +65,22 @@ CALCULATOR_PATTERNS = [
     r"дедлайн.*(bachelor|бакалавр|master|магистр|phd)",
 ]
 
-# Document checklist patterns (TOOL_ONLY: get_document_checklist)
+# Specific sub-patterns used to disambiguate within CALCULATOR_PATTERNS matches.
+DEADLINE_SUBPATTERNS = [
+    r"(дедлайн|срок|deadline)",
+    r"когда.*(подавать|подать)",
+]
+
+BUDGET_SUBPATTERNS = [
+    r"(бюджет|стоимость|расход|сколько.*(стоит|денег|нужно денег))",
+]
+
+DATE_MATH_SUBPATTERNS = [
+    r"сколько (дней|времени) (до|осталось)",
+    r"успе(ю|ваю|ть).*(подать|дедлайн)",
+]
+
+# Document checklist patterns (general → RAG_ONLY from facts/; personal → TOOL_THEN_RAG via get_my_progress)
 DOCUMENT_PATTERNS = [
     r"(как(ие|ой)|список|чек-?лист).*(документ|бумаг)",
     r"документ.*(нужн|нужен|необходим|требу)",
@@ -155,56 +173,64 @@ def classify_intent(question: str) -> RouteResult:
             reason="Вопрос о персональном прогрессе",
         )
 
-    # 3. Check calculator patterns
+    # 3. Check calculator patterns (deadline / budget / date-math sub-intents).
+    # Factual deadline info lives in facts/ and must go through RAG. Budget
+    # questions get the calculate_budget tool result injected into generation
+    # (TOOL_THEN_RAG). Pure date-math is the only TOOL_ONLY calculator case.
     if _match_patterns(question, CALCULATOR_PATTERNS):
-        tools = []
-        if re.search(r"(дедлайн|срок|deadline|когда.*(подавать|подать))", question_lower):
-            tools.append("check_deadline")
-        if re.search(r"(бюджет|стоимость|расход|сколько.*(стоит|денег|нужно))", question_lower):
-            tools.append("calculate_budget")
-        if re.search(r"(сколько|успе).*(дней|времени)", question_lower):
-            tools.append("calculate_days_until")
+        is_budget = _match_patterns(question, BUDGET_SUBPATTERNS)
+        is_deadline = _match_patterns(question, DEADLINE_SUBPATTERNS)
+        is_date_math = _match_patterns(question, DATE_MATH_SUBPATTERNS)
 
-        if not tools:
-            tools = ["check_deadline"]
-
-        # If university mentioned, pure tool. Otherwise might need RAG too.
-        has_specific_uni = re.search(
-            r"(uni wien|tu wien|wu wien|boku|meduni|jku|tu graz|uni graz|uni innsbruck|uni salzburg)",
-            question_lower
-        )
-
-        if has_specific_uni:
-            return RouteResult(
-                intent=Intent.TOOL_ONLY,
-                suggested_tools=tools,
-                confidence=0.85,
-                reason="Конкретный расчёт с указанным университетом",
-            )
-        else:
+        # If a question matches both deadline and budget, prefer budget TOOL_THEN_RAG.
+        if is_budget:
             return RouteResult(
                 intent=Intent.TOOL_THEN_RAG,
-                suggested_tools=tools,
-                confidence=0.7,
-                reason="Расчёт, возможно нужен контекст из базы знаний",
+                suggested_tools=["calculate_budget"],
+                confidence=0.8,
+                reason="Вопрос о бюджете — расчёт + контекст из базы знаний",
             )
+
+        if is_date_math:
+            return RouteResult(
+                intent=Intent.TOOL_ONLY,
+                suggested_tools=["calculate_days_until"],
+                confidence=0.85,
+                reason="Чистый расчёт количества дней до даты",
+            )
+
+        if is_deadline:
+            return RouteResult(
+                intent=Intent.RAG_ONLY,
+                suggested_tools=[],
+                confidence=0.85,
+                reason="Вопрос о дедлайне — информация из базы знаний (facts/)",
+            )
+
+        # Fallback within calculator patterns: send to RAG for safety.
+        return RouteResult(
+            intent=Intent.RAG_ONLY,
+            suggested_tools=[],
+            confidence=0.6,
+            reason="Расчётный вопрос без точного под-намерения — используем базу знаний",
+        )
 
     # 4. Check document patterns
     if _match_patterns(question, DOCUMENT_PATTERNS):
         # Check if asking about personal progress vs general info
         if re.search(r"(мо(й|и|я)|мне)", question_lower):
             return RouteResult(
-                intent=Intent.TOOL_ONLY,
-                suggested_tools=["get_my_progress", "get_document_checklist"],
+                intent=Intent.TOOL_THEN_RAG,
+                suggested_tools=["get_my_progress"],
                 confidence=0.8,
-                reason="Персональный чек-лист документов",
+                reason="Персональный прогресс + список документов из базы знаний",
             )
         else:
             return RouteResult(
-                intent=Intent.TOOL_THEN_RAG,
-                suggested_tools=["get_document_checklist"],
+                intent=Intent.RAG_ONLY,
+                suggested_tools=[],
                 confidence=0.75,
-                reason="Общий чек-лист + детали из базы знаний",
+                reason="Общая информация о документах из базы знаний",
             )
 
     # 5. Check knowledge base patterns

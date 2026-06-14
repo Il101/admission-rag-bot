@@ -1,13 +1,12 @@
 # admission-rag-bot
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
-![LangChain](https://img.shields.io/badge/LangChain-RAG-green.svg)
 ![Telegram Bot](https://img.shields.io/badge/Telegram-Bot%20API-blue?logo=telegram)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-316192?logo=postgresql)
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-> 🎓 AI-powered Telegram assistant helping students with university admission questions using advanced RAG techniques
+> 🎓 AI-powered Telegram assistant helping students with university admission questions using Retrieval-Augmented Generation
 
 An intelligent Telegram bot built with **Retrieval-Augmented Generation (RAG)** to automatically answer frequently asked questions about university admission, visa processes, housing, scholarships, and student life in Austria. Reduces volunteer workload by providing instant, accurate responses from a curated knowledge base.
 
@@ -16,96 +15,89 @@ An intelligent Telegram bot built with **Retrieval-Augmented Generation (RAG)** 
 Built to reduce volunteer workload during university admission season. Handles FAQ about applications, visa processes, housing, and student life — so volunteers can focus on complex individual cases.
 
 **Technical highlights:**
-- 3 RAG pipeline variants with increasing sophistication
-- Hybrid dense + sparse retrieval (pgvector + Elasticsearch BM25)
-- Reciprocal Rank Fusion ensemble retrieval
-- Configurable via Hydra — swap LLMs and retrieval strategies without code changes
+- A single, feature-rich RAG pipeline (`SimpleRAG`) combining dense vector search with PostgreSQL full-text search
+- Query rewriting, LLM-based document grading, optional reranking, and HyDE (Hypothetical Document Embeddings)
+- Semantic answer caching and an intent/query router (fact vs. narrative vs. tool-based questions)
+- Pluggable LLM/embedding providers (Google Gemini, OpenAI, NVIDIA / OpenAI-compatible APIs) via environment variables
 
 ## ✨ Features
 
-### 🤖 Advanced RAG Pipelines
-- **Simple RAG**: Direct document retrieval and answer generation
-- **Conditional RAG with Filtering**: LLM-powered document relevance scoring
-- **Conditional RAG with Question Rewriting**: Automatic query reformulation for better results
+### 🤖 RAG Pipeline (SimpleRAG)
+- **Hybrid retrieval**: dense vector similarity search (pgvector) combined with PostgreSQL native full-text search ("BM25-like" ranking)
+- **Query rewriting**: automatic reformulation of queries that don't retrieve relevant results
+- **LLM-based document grading**: batch relevance scoring of retrieved chunks before they're used in the answer
+- **HyDE**: generates a hypothetical answer to improve retrieval for hard queries
+- **Optional reranking** of retrieved documents
+- **Semantic answer cache**: caches full answers keyed by embedding similarity of the question, skipping the full pipeline on near-duplicate questions
+- **Query router**: classifies questions as fact (structured YAML data), narrative (markdown guides), tool-based, or chit-chat, and routes them accordingly
+- **Tool calling**: lets the LLM call tools (e.g., for deterministic lookups) in addition to retrieval
 
-### 🔍 Hybrid Search System
-- **Dense Vector Search**: Semantic search using sentence embeddings (pgvector)
-- **Sparse BM25 Search**: Keyword-based retrieval (Elasticsearch)
-- **Ensemble Retriever**: Combines both approaches with Reciprocal Rank Fusion
-- **Parent Document Strategy**: Searches small chunks, returns full context
+### 🔍 Hybrid Search
+- **Dense vector search**: semantic search over embeddings stored in pgvector
+- **Full-text search**: PostgreSQL `tsvector`/`tsquery`-based keyword search
+- Results from both are combined with weighted scoring (`VECTOR_WEIGHT` / `FTS_WEIGHT` in `crag/simple_rag.py`)
 
-### 🧠 Flexible LLM Support
-- **Gemma2-2B** (default): CPU-optimized quantized model
-- **OpenAI GPT models**: Optional cloud integration
-- **Google Gemini**: Alternative cloud LLM
-- Configurable via Hydra framework
+### 🧠 LLM & Embedding Providers
+- **Google Gemini** (default): `gemini-2.5-flash`, with native embeddings (`gemini-embedding-001`)
+- **OpenAI-compatible APIs**: OpenAI, NVIDIA, OpenRouter and similar providers, selected via `LLM_PROVIDER`
+- Switching providers is done via environment variables (see `docs/LLM_PROVIDERS.md`), not via Hydra config groups
 
-### 🇺🇦 Ukrainian Language Optimization
-- Uses multilingual sentence transformers optimized for Ukrainian
-- Ukrainian-aware text processing and embeddings
+### 🌐 Multilingual Support
+- Knowledge base facts and prompts mix Russian, German and English source material
+- LLM-based answer generation handles the user's language directly — no separate local translation/embedding models are used
 
 ### 🛠 Production-Ready
-- Docker Compose deployment
-- PostgreSQL with pgvector extension
-- Elasticsearch for BM25 search
-- Comprehensive configuration system (Hydra)
+- Docker Compose deployment (bot + PostgreSQL/pgvector + pgAdmin)
+- PostgreSQL with the pgvector extension for vector storage
+- Structured fact-based knowledge base (`facts/`) plus markdown narrative guides
 - Admin commands for knowledge base management
+- Optional Langfuse observability integration
 
 ## 🏗 Architecture
 
-### RAG Pipelines
+### RAG Pipeline
 
-The bot implements three sophisticated RAG pipelines, each with increasing intelligence:
+The live implementation is the `SimpleRAG` class (`crag/simple_rag.py`), which combines several techniques into a single pipeline:
 
-#### 1. Simple RAG
-Direct retrieval and generation pipeline:
 ```
-Query → Retriever → Documents → LLM → Answer
-```
-
-#### 2. Conditional RAG with Filtering
-Adds document relevance scoring:
-```
-Query → Retriever → Documents → Grading (LLM) → Relevant Docs → LLM → Answer
-                                              ↓ (if none relevant)
-                                           Give Up Message
+Query → Query Router (fact / narrative / tool / chitchat)
+      → [optional] Query Rewriting / HyDE
+      → Hybrid Retrieval (pgvector similarity + PostgreSQL full-text search)
+      → LLM Document Grading (batch relevance scoring)
+      → [optional] Reranking
+      → Semantic Cache check
+      → LLM → Answer
 ```
 
-#### 3. Conditional RAG with Question Rewriting (Default)
-Automatically reformulates queries for better results:
-```
-Query → Retriever → Documents → Grading → Relevant Docs → LLM → Answer
-                                       ↓ (if none relevant)
-                                  Rewrite Query → Retry (max 3 times)
-```
+If no relevant documents are found, the pipeline can rewrite the query and retry retrieval (bounded number of attempts) before falling back to a "no answer found" message.
 
 ### Technology Stack
 
 **Backend Framework**
 - Python 3.11+
-- aiogram 3.x (Telegram Bot API)
-- LangChain (RAG orchestration)
+- `python-telegram-bot` (Telegram Bot API)
+- SQLAlchemy (async) for database access
 
 **Vector Search & Retrieval**
-- PostgreSQL 16 with pgvector extension
-- Elasticsearch 8.x (BM25 search)
-- SentenceTransformers (`lang-uk/ukr-paraphrase-multilingual-mpnet-base`)
+- PostgreSQL 16 with the `pgvector` extension (`pgvector/pgvector:pg16` image)
+- Hybrid search: pgvector similarity search + PostgreSQL native full-text search (no separate search engine)
 
-**LLM Integration**
-- llama.cpp (local inference)
-- OpenAI API (optional)
-- Google Gemini API (optional)
+**LLM & Embeddings**
+- Google Gemini API (`gemini-2.5-flash`, default) — also used for embeddings (`gemini-embedding-001`)
+- OpenAI-compatible APIs (OpenAI, NVIDIA, OpenRouter, etc.) as alternative LLM/embedding providers
+- All LLM and embedding calls go through external APIs — there is no local model inference (no llama.cpp, no SentenceTransformers, no torch)
 
 **Configuration & Orchestration**
-- Hydra (configuration management)
+- Hydra/OmegaConf for prompt configuration (`configs/default.yaml` + `configs/prompts/`)
 - Docker Compose (deployment)
+- Optional Langfuse for LLM observability/tracing
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
-- 8GB+ RAM (for local LLM inference)
 - Telegram Bot Token (from [@BotFather](https://t.me/botfather))
+- An API key for at least one LLM provider (Google Gemini, OpenAI, or NVIDIA)
 
 ### Installation
 
@@ -115,115 +107,115 @@ git clone https://github.com/Il101/admission-rag-bot.git
 cd admission-rag-bot
 ```
 
-2. **Download required models**
+2. **Configure environment**
 ```bash
-bash init_scripts/download_embeddings.sh
-bash init_scripts/download_llm.sh  # Optional: for local inference
-```
-
-3. **Configure environment**
-```bash
-cp example.env .env
+cp .env.example .env
 # Edit .env with your settings:
 # - TGBOT_TOKEN: Your Telegram bot token
-# - GOOGLE_API_KEY or OPENAI_API_KEY: If using cloud LLMs
+# - GOOGLE_API_KEY (default provider) or OPENAI_API_KEY / NVIDIA_API_KEY
+# - POSTGRES_* variables for the database connection
 ```
 
-4. **Prepare data directories**
-```bash
-bash init_scripts/prepare_data_volumes.sh
-```
-
-5. **Start services**
+3. **Start services**
 ```bash
 docker compose up -d
 ```
+This starts the bot, a `pgvector/pgvector:pg16` PostgreSQL database, and pgAdmin.
+
+4. **Index the knowledge base**
+The knowledge base lives in `facts/` (structured YAML facts) and is indexed into pgvector via:
+```bash
+python3 -m init_scripts.index_knowledge_base
+```
+This step runs automatically as part of the container startup sequence (`init_scripts/entry.sh`), but can be re-run manually after editing facts (see `docs/REINDEX_KB.md`).
 
 The bot will be online and ready to answer questions!
 
 ## 💬 Bot Commands
 
 ### User Commands
-- `/start` - Welcome message and bot introduction
+- `/start` - Welcome message and onboarding
 - `/help` - Display available commands
 - `/ans <question>` - Get AI-generated answer to your question
 - `/ans_rep` - Answer question from replied message
 - `/docs <question>` - Get relevant documents without LLM answer
 - `/docs_rep` - Get documents from replied message
+- `/delete_my_data` - Delete your stored data
 
 ### Admin Commands
-- `/ban <user_id>` - Ban user from using the bot
-- `/unban <user_id>` - Unban user
-- `/add_fact` - Add information to knowledge base
-- `/add_link` - Add public resource link
+- `/ban <user_id>` / `/unban <user_id>` - Ban/unban a user
+- `/add_admin` - Grant admin rights
+- `/add` / `/del` - Add or remove a knowledge base fact
+- `/stats` - Show usage statistics
 
-*Admin commands require authorized Telegram ID in configuration*
+*Admin commands require an authorized Telegram ID configured via `FATHER_TG_ID`.*
 
 ## ⚙️ Configuration
 
-The bot uses [Hydra](https://hydra.cc/) for flexible configuration management. All configs are in the `configs/` directory.
+The bot uses [Hydra](https://hydra.cc/)/OmegaConf for a small amount of configuration, primarily prompt selection. The actual config tree is minimal:
 
-### Configuration Structure
 ```
 configs/
-├── default.yaml          # Main configuration
-├── llm/                  # LLM provider configs
-├── retriever/            # Retriever strategy configs
-├── prompts/              # System prompts
-├── pipeline/             # RAG pipeline configs
-└── knowledge/            # Data loading configs
+├── default.yaml          # Top-level config: selects the active prompt set and DB connection string
+└── prompts/               # Prompt templates per model
+    ├── gemini-2.5-flash.yaml
+    ├── chatgpt-4o-mini.yaml
+    └── gemma2.yaml
 ```
 
-### Switching RAG Pipelines
+`configs/default.yaml` selects which prompt file is active (default: `gemini-2.5-flash`) and builds the PostgreSQL connection string from environment variables. There are **no** `configs/llm/`, `configs/retriever/`, `configs/pipeline/`, or `configs/knowledge/` config groups — LLM provider selection, retrieval behavior, and pipeline behavior are controlled via environment variables and code in `crag/`, not via Hydra config groups.
 
-Edit `configs/default.yaml`:
-```yaml
-defaults:
-  - pipeline: simple_rag              # Simple RAG
-  # - pipeline: rag_with_filtering    # With filtering
-  # - pipeline: rag_with_rewriting    # With rewriting (default)
-```
+### Switching LLM / Embedding Providers
 
-### Using Different LLMs
+Provider selection is done via environment variables (see `docs/LLM_PROVIDERS.md` for details), e.g.:
 
-**OpenAI:**
-```yaml
-# configs/default.yaml
-defaults:
-  - llm: openai
-```
 ```bash
 # .env
-OPENAI_API_KEY=your_key_here
-```
-
-**Google Gemini:**
-```yaml
-defaults:
-  - llm: gemini
-```
-```bash
-# .env
+LLM_PROVIDER=google          # google (default) | openai | nvidia
 GOOGLE_API_KEY=your_key_here
+```
+
+### Switching Prompts
+
+To use a different prompt set, change the `prompts` default in `configs/default.yaml`:
+```yaml
+defaults:
+  - _self_
+  - prompts: gemini-2.5-flash   # or: chatgpt-4o-mini, gemma2
 ```
 
 ## 📊 Project Structure
 
 ```
 admission-rag-bot/
-├── bot/                  # Telegram bot implementation
-│   ├── handlers/         # Command handlers
-│   ├── middlewares/      # Bot middlewares
-│   └── filters/          # Message filters
-├── crag/                 # RAG pipeline implementation
-│   ├── chains/           # LangChain workflows
-│   ├── llm_providers.py  # LLM integrations
-│   └── retrievers.py     # Search implementations
-├── configs/              # Hydra configuration
-├── init_scripts/         # Deployment utilities
-├── knowledge_base/       # Knowledge base (not in git)
-├── tests/                # Unit tests
-└── docker-compose.yml    # Docker orchestration
+├── bot/                   # Telegram bot implementation
+│   ├── handlers/          # Command handlers (rag, management, onboarding, ...)
+│   ├── middlewares/        # Bot middlewares
+│   └── filters/            # Message filters
+├── crag/                  # RAG pipeline implementation
+│   ├── simple_rag.py      # SimpleRAG: hybrid retrieval, grading, HyDE, caching
+│   ├── llm_providers.py   # LLM/embedding provider abstraction (Google, OpenAI, NVIDIA)
+│   ├── query_router.py    # Fact vs. narrative query classification
+│   ├── router.py          # Intent routing (tool / RAG / chitchat)
+│   ├── pipeline.py        # Pipeline steps and guardrails
+│   ├── yaml_facts_indexer.py  # Indexes facts/*.yaml into pgvector
+│   ├── parent_child_chunking.py  # Optional parent-child chunk generation
+│   ├── tag_set_layer.py   # Domain tag boosting for retrieval
+│   ├── assertion_validator.py  # Post-generation cross-entity checks
+│   ├── ab_testing.py      # A/B testing helpers
+│   ├── observability.py   # Langfuse tracing helpers
+│   └── tools.py           # Tool-calling implementations
+├── facts/                 # Structured knowledge base (YAML)
+│   ├── universities/       # University-specific facts (deadlines, fees, etc.)
+│   ├── language/           # Language requirements, course providers
+│   └── financial/          # Cost-of-living / budget facts
+├── configs/               # Hydra configuration (default.yaml + prompts/)
+├── init_scripts/          # Startup, DB init, and indexing scripts
+├── scripts/               # Utility scripts (ingestion, KB freshness checks)
+├── schema/                # Documentation of the facts/ YAML schema
+├── tests/                 # Unit tests
+├── docker-compose.yml     # Docker orchestration (bot + pgvector + pgAdmin)
+└── docker-compose.release.yml  # Compose file using a prebuilt image
 ```
 
 ## 🔧 Development
@@ -234,19 +226,21 @@ pytest tests/
 ```
 
 ### Adding Knowledge
-The bot's knowledge base is organized in markdown files (excluded from git for privacy):
+
+The active knowledge base is the set of structured YAML facts in `facts/` (see `schema/README.md` for the schema):
 ```
-knowledge_base/
-├── universities/         # University-specific info
-├── processes/            # Visa, housing, etc.
-├── financial/            # Costs, scholarships
-└── language/             # Language requirements
+facts/
+├── universities/   # University-specific facts (deadlines, tuition, language requirements, ...)
+├── language/        # Language course providers and certification rules
+└── financial/       # Cost-of-living and budget facts
 ```
 
-Add new documents and run ingestion:
+After adding or editing facts, re-index the knowledge base:
 ```bash
-python ingest_all.py
+python3 -m init_scripts.index_knowledge_base
 ```
+
+`scripts/ingest_all.py` is a scraping/ingestion helper for generating narrative markdown source documents from external sites, and `scripts/verify_kb_freshness.py` checks whether those source documents have changed since the last ingestion. The indexer also scans a `knowledge_base/` directory for markdown content if present; in this repo the active, indexed knowledge base is the structured YAML in `facts/`.
 
 ## 📈 Use Cases
 
@@ -259,9 +253,8 @@ python ingest_all.py
 ## 🤝 Contributing
 
 Contributions are welcome! Areas for improvement:
-- Fine-tuning LLMs for Ukrainian
-- Adding encoder-based document filtering
-- Expanding retrieval strategies
+- Expanding the structured facts knowledge base
+- Improving query routing and retrieval ranking
 - UI/UX improvements for admin tools
 
 ## 📄 License
@@ -271,10 +264,8 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## 🙏 Acknowledgments
 
 Built with:
-- [LangChain](https://github.com/langchain-ai/langchain) - RAG framework
-- [aiogram](https://github.com/aiogram/aiogram) - Telegram Bot framework
-- [llama.cpp](https://github.com/ggerganov/llama.cpp) - Local LLM inference
-- [pgvector](https://github.com/pgvector/pgvector) - Vector similarity search
+- [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) - Telegram Bot framework
+- [pgvector](https://github.com/pgvector/pgvector) - Vector similarity search for PostgreSQL
 
 ---
 

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "init_scripts"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "init_scripts"))
 from index_knowledge_base import parse_frontmatter, split_markdown
 
 

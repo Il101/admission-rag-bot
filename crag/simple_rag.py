@@ -491,7 +491,8 @@ class SimpleRAG:
             hypothetical = await retry_on_503(
                 self.llm_provider.generate,
                 prompt=prompt,
-                system_prompt=None  # System prompt is embedded in the prompt
+                system_prompt=None,  # System prompt is embedded in the prompt
+                temperature=0.0,
             )
             hypothetical = (hypothetical or "").strip()
             if hypothetical:
@@ -607,12 +608,23 @@ class SimpleRAG:
         """
         # Classify the query
         routing_result = classify_query(query)
+        query_type = routing_result.query_type
         weights = get_search_weights(routing_result)
 
         logger.info(
             f"Query routing: '{query[:50]}...' → {routing_result.query_type.value} "
             f"(confidence={routing_result.confidence:.2f})"
         )
+
+        # HyDE generates a hypothetical document, which risks introducing
+        # hallucinated specifics (dates, numbers, names) for FACT queries.
+        # Only use it for NARRATIVE/HYBRID queries where it helps surface
+        # process/explanation chunks.
+        use_hyde = use_hyde and (query_type != QueryType.FACT)
+        if use_hyde:
+            logger.info("HyDE gating: enabled for query_type=%s", query_type.value)
+        elif query_type == QueryType.FACT:
+            logger.info("HyDE gating: disabled for FACT query")
 
         search_query = query
         if use_hyde:
@@ -732,7 +744,8 @@ class SimpleRAG:
             response_text = await retry_on_503(
                 self.llm_provider.generate,
                 prompt=prompt,
-                system_prompt=None
+                system_prompt=None,
+                temperature=0.0,
             )
             data = json.loads(response_text or "{}")
             sub_questions = data.get("sub_questions", [question])
@@ -843,7 +856,8 @@ class SimpleRAG:
             response_text = await retry_on_503(
                 self.llm_provider.generate,
                 prompt=prompt,
-                system_prompt=None
+                system_prompt=None,
+                temperature=0.0,
             )
             data = json.loads(response_text or "{}")
             scores = data.get("scores", [])
@@ -888,7 +902,8 @@ class SimpleRAG:
             rewritten = await retry_on_503(
                 self.llm_provider.generate,
                 prompt=user_prompt,
-                system_prompt=self.rewrite_system_prompt
+                system_prompt=self.rewrite_system_prompt,
+                temperature=0.0,
             )
             rewritten = (rewritten or "").strip()
             if rewritten:
@@ -929,17 +944,21 @@ class SimpleRAG:
             response_text = await retry_on_503(
                 self.llm_provider.generate,
                 prompt=batch_prompt,
-                system_prompt=self.grading_system_prompt
+                system_prompt=self.grading_system_prompt,
+                temperature=0.0,
             )
             raw = (response_text or "{}").strip()
             data = json.loads(raw)
             scores = data.get("scores", [1] * len(docs))
 
-            # Validate length
+            # Validate length — count mismatch means the LLM response was
+            # malformed (infra/parse issue, not a real "nothing relevant"
+            # signal), so fail open and keep all docs.
             if len(scores) != len(docs):
                 logger.warning(
                     f"Grading returned {len(scores)} scores for "
-                    f"{len(docs)} docs, keeping all."
+                    f"{len(docs)} docs (count mismatch), failing open "
+                    f"and keeping all."
                 )
                 return docs
 
@@ -953,14 +972,20 @@ class SimpleRAG:
                 )
                 return relevant
             else:
+                # Scores parsed correctly and ALL documents were graded
+                # irrelevant — this is a genuine "nothing relevant" signal,
+                # not an infra/parse issue. Return empty so the pipeline's
+                # GradeStep short-circuits to the honest "не нашли" answer
+                # instead of grounding on irrelevant docs.
                 logger.info(
-                    f"Grading filtered all docs, falling back to full set "
-                    f"({len(docs)})"
+                    f"Grading: all {len(docs)} docs scored irrelevant -> "
+                    f"giving up (empty), strict grounding refusal"
                 )
-                return docs
+                return []
 
         except Exception as e:
-            logger.warning(f"Batch grading failed, keeping all docs: {e}")
+            # Parse/infra failure — fail open and keep all docs.
+            logger.warning(f"Batch grading failed (parse/infra error), keeping all docs: {e}")
             return docs
 
     # ── Streaming answer ─────────────────────────────────────────────────
@@ -1009,16 +1034,61 @@ class SimpleRAG:
 
     # ── Semantic answer cache ────────────────────────────────────────────
 
-    async def get_cached_answer(self, question: str) -> str | None:
-        """Check if a semantically similar question was already answered."""
-        emb = await self.get_embedding(question)
+    @staticmethod
+    def _cache_key_text(question: str, user_filters: dict | None) -> str:
+        """Build the text used for cache embedding, scoped by user filters.
+
+        Prepending a stable filter prefix (country_scope, level) ensures
+        users with different profiles don't collide on the same cached
+        answer for otherwise-similar questions.
+        """
+        if not user_filters:
+            return question
+        country = user_filters.get("country_scope") or ""
+        level = user_filters.get("level") or ""
+        prefix = f"[scope:{country}|{level}] "
+        return prefix + question
+
+    async def get_cached_answer(
+        self,
+        question: str,
+        query_type: "QueryType | None" = None,
+        user_filters: dict | None = None,
+    ) -> str | None:
+        """Check if a semantically similar question was already answered.
+
+        FACT-type queries (deadlines, numbers, requirements) are never
+        served from cache — the risk of returning a cached answer that
+        was actually about a different university/city/profile is too
+        high. For other query types, the cache key incorporates the
+        user's filters (country_scope, level) so profiles don't collide.
+        """
+        if query_type == QueryType.FACT:
+            logger.info("Semantic cache: skipped for FACT query")
+            return None
+
+        cache_text = self._cache_key_text(question, user_filters)
+        emb = await self.get_embedding(cache_text)
         if not emb:
             return None
         return _answer_cache.get(emb)
 
-    async def cache_answer(self, question: str, answer_json: str):
-        """Store a question → answer pair in the semantic cache."""
-        emb = await self.get_embedding(question)
+    async def cache_answer(
+        self,
+        question: str,
+        answer_json: str,
+        query_type: "QueryType | None" = None,
+        user_filters: dict | None = None,
+    ):
+        """Store a question → answer pair in the semantic cache.
+
+        FACT-type queries are never stored, mirroring get_cached_answer.
+        """
+        if query_type == QueryType.FACT:
+            return
+
+        cache_text = self._cache_key_text(question, user_filters)
+        emb = await self.get_embedding(cache_text)
         if emb:
             _answer_cache.put(emb, answer_json)
 
@@ -1121,6 +1191,9 @@ class SimpleRAG:
 
         tool_schemas = get_tool_schemas()
         tools_desc = json.dumps(tool_schemas, ensure_ascii=False, indent=2)
+        available_tool_names = ", ".join(
+            t.get("name", "") for t in tool_schemas if t.get("name")
+        )
 
         prompt = f"""Проанализируй вопрос пользователя и определи, нужен ли инструмент.
 
@@ -1132,9 +1205,10 @@ class SimpleRAG:
 {tools_desc}
 
 ПРАВИЛА:
-1. Используй check_deadline ТОЛЬКО если спрашивают о конкретном дедлайне для конкретного вуза
+1. Используй ТОЛЬКО инструменты из списка выше: {available_tool_names}
 2. Используй calculate_budget ТОЛЬКО если спрашивают о расходах/бюджете в конкретном городе
-3. Используй get_document_checklist ТОЛЬКО если просят чек-лист документов
+3. Используй calculate_days_until ТОЛЬКО если нужно посчитать количество дней до конкретной даты
+4. Используй get_my_progress, get_next_steps, get_my_profile, get_my_entities ТОЛЬКО для вопросов о личном прогрессе, профиле или сохранённых данных пользователя
 
 Если вопрос общий или теоретический — НЕ используй инструменты.
 
@@ -1148,7 +1222,8 @@ class SimpleRAG:
             response_text = await retry_on_503(
                 self.llm_provider.generate,
                 prompt=prompt,
-                system_prompt=None
+                system_prompt=None,
+                temperature=0.0,
             )
             data = json.loads(response_text or "{}")
 

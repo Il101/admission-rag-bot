@@ -1,0 +1,60 @@
+# Cost of Living Estimates in Austria
+# SSOT: This file is the single source of truth for monthly cost-of-living
+# estimates used by the calculate_budget tool. Edit values here directly —
+# no code changes needed.
+# Last verified: 2026-03-01
+
+id: cost-of-living
+
+currency: EUR
+
+# Monthly costs by city (in EUR), at "medium" lifestyle level.
+# calculate_budget applies a lifestyle multiplier (low/medium/high) on top
+# of these base values.
+cities:
+  vienna:
+    rent: 600      # WG/Studentenheim
+    food: 300
+    transport: 50  # Semesterticket
+    misc: 150
+    insurance: 65
+
+  wien:
+    rent: 600
+    food: 300
+    transport: 50
+    misc: 150
+    insurance: 65
+
+  graz:
+    rent: 450
+    food: 280
+    transport: 40
+    misc: 120
+    insurance: 65
+
+  innsbruck:
+    rent: 550
+    food: 290
+    transport: 45
+    misc: 130
+    insurance: 65
+
+  linz:
+    rent: 480
+    food: 280
+    transport: 40
+    misc: 120
+    insurance: 65
+
+  salzburg:
+    rent: 550
+    food: 290
+    transport: 45
+    misc: 130
+    insurance: 65
+
+tips:
+  - "Studentenheim дешевле, чем WG — подавайте заявку заранее"
+  - "Semesterticket даёт скидку на транспорт"
+  - "Mensa (студенческая столовая) — обед от €5-7"

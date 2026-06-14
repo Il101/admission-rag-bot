@@ -65,27 +65,6 @@ async def _update_processing_phase(msg, phase: str) -> bool:
         return False
 
 
-def _use_new_pipeline_enabled() -> bool:
-    """Feature flag for gradual migration to crag.pipeline orchestrator."""
-    return os.getenv("USE_NEW_PIPELINE", "false").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
-
-
-def _use_pipeline_shadow_enabled() -> bool:
-    """Enable background shadow run of pipeline v2 while serving legacy path."""
-    return os.getenv("USE_NEW_PIPELINE_SHADOW", "false").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
-
-
-def _use_routing_enabled() -> bool:
-    """Enable smart routing with intent classification (bypasses RAG when not needed)."""
-    return os.getenv("USE_ROUTING", "true").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
-
-
 def _safe_stream_plain_enabled() -> bool:
     """Use plain text for partial streaming edits to avoid Telegram HTML parse errors."""
     return os.getenv("SAFE_STREAM_PLAIN", "true").strip().lower() in {
@@ -574,486 +553,6 @@ def _fmt_timings(t: dict) -> str:
     return " | ".join(f"{k}: {v:.2f}s" for k, v in t.items())
 
 
-async def _handle_question_core(
-    context,
-    simple_rag,
-    db_session,
-    chat_id: int,
-    reply_to_id: int,
-    tg_id: int,
-    question: str,
-    onboarding_data: dict,
-    db_session_factory=None,
-    use_hyde: bool = True,
-    use_tools: bool = True,
-    use_reranking: bool = True,
-):
-    """Core logic: memory → tools → rewrite → cache → retrieve → grade → rerank → stream → send.
-
-    Enhanced with HyDE, Function Calling, and Re-ranking.
-    Shared by answer(), answer_to_replied(), and handle_suggested_question().
-    """
-    timings = {}
-    pipeline_start = time.monotonic()
-    # Defaults so the except block can always reference them
-    actual_question = question
-    retrieved_count = 0
-    doc_sources: list = []
-    tool_result = None
-    response_delivered = False
-
-    # Always restore onboarding from DB if lost after bot restart
-    onboarding_data = await _ensure_onboarding_loaded(context, db_session, tg_id)
-
-    memory, chat_history_str, memory_context_str = await _load_memory(
-        db_session, tg_id, onboarding_data
-    )
-
-    msg = await context.bot.send_message(
-        chat_id=chat_id,
-        reply_to_message_id=reply_to_id,
-        text="🔍 Ищу информацию...",
-    )
-
-    try:
-        # 1. Rewrite query for better vector search (resolves anaphora, adds keywords)
-        t0 = time.monotonic()
-        actual_question = await simple_rag.arewrite_query(
-            question, chat_history_str, memory_context_str
-        )
-        timings["rewrite"] = time.monotonic() - t0
-
-        # 1b. Check if tool/function call is needed
-        if use_tools:
-            t0 = time.monotonic()
-            tool_needed = await simple_rag.acheck_tool_need(actual_question, memory_context_str)
-            timings["tool_check"] = time.monotonic() - t0
-
-            if tool_needed:
-                t0 = time.monotonic()
-                tool_result = await simple_rag.aexecute_tool(
-                    tool_needed["tool_name"],
-                    tool_needed["arguments"],
-                )
-                timings["tool_execute"] = time.monotonic() - t0
-                logger.info(f"[User {tg_id}] Tool executed: {tool_needed['tool_name']}")
-
-        # 1c. Check semantic answer cache
-        t0 = time.monotonic()
-        cached_response = await simple_rag.get_cached_answer(actual_question)
-        timings["cache_check"] = time.monotonic() - t0
-
-        if cached_response and not tool_result:  # Skip cache if tool was used
-            clean_text, suggested = parse_suggested_buttons(cached_response)
-            clean_text = _postprocess_answer_text(clean_text)
-            clean_text = _apply_confirmed_fact_guardrails(clean_text, memory)
-            safe_text = sanitize_telegram_html(clean_text)
-            keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
-            response_delivered = await _safe_edit_message(
-                msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard
-            )
-            if suggested:
-                _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
-            _store_qa(context, msg.message_id, question, clean_text)
-            await add_chat_messages(db_session, tg_id, question, clean_text)
-            if db_session_factory:
-                asyncio.create_task(
-                    update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
-                )
-            timings["total"] = time.monotonic() - pipeline_start
-            logger.info("[User %s] Cache hit | %s", tg_id, _fmt_timings(timings))
-            _emit_observability_metrics(
-                user_id=tg_id,
-                question=question,
-                timings=timings,
-                docs_retrieved=0,
-                docs_graded=0,
-                cache_hit=True,
-            )
-            if db_session_factory:
-                asyncio.create_task(add_pipeline_log(
-                    db_session_factory, tg_id, question, actual_question,
-                    cache_hit=True, docs_retrieved=0, docs_after_grading=0, timings=timings,
-                ))
-            return
-
-        # 2. Retrieve candidates with HyDE and smart query routing
-        await _update_processing_phase(msg, "analyze")
-        t0 = time.monotonic()
-        user_filters = _build_user_filters(onboarding_data)
-        docs = await simple_rag.aretrieve_smart(
-            actual_question,
-            user_filters=user_filters,
-            use_hyde=use_hyde,
-            memory_context=memory_context_str,
-        )
-        retrieved_count = len(docs)
-        timings["retrieve"] = time.monotonic() - t0
-
-        # 3. Grade for relevance (CRAG filtering)
-        t0 = time.monotonic()
-        docs = await simple_rag.agrade_documents(actual_question, docs)
-        timings["grade"] = time.monotonic() - t0
-
-        # 3b. Re-rank for better precision
-        if use_reranking and len(docs) > 4:
-            t0 = time.monotonic()
-            rerank_timeout = _get_rerank_soft_timeout_sec()
-            if rerank_timeout > 0:
-                try:
-                    docs = await asyncio.wait_for(
-                        simple_rag.arerank_documents(actual_question, docs, top_k=6),
-                        timeout=rerank_timeout,
-                    )
-                except asyncio.TimeoutError:
-                    logger.info(
-                        "[User %s] Rerank soft-timeout after %.2fs, keeping graded order",
-                        tg_id, rerank_timeout,
-                    )
-                    docs = docs[:6]
-            else:
-                docs = await simple_rag.arerank_documents(actual_question, docs, top_k=6)
-            timings["rerank"] = time.monotonic() - t0
-
-        # Collect source URLs from surviving docs for the pipeline log
-        doc_sources = [
-            doc.metadata.get("source_url", "") for doc in docs
-            if doc.metadata.get("source_url")
-        ]
-
-        # Even with no docs, let LLM try to answer from system knowledge (date, greetings, etc.)
-        # LLM will decide if it can answer without context based on prompt rules
-        if len(docs) == 0:
-            context_str = "(Контекст из базы знаний пуст — попробуй ответить из системных знаний, если вопрос общий)"
-        else:
-            context_str = documents_to_context_str(docs)
-
-        # 4. Stream answer (with tool result if available)
-        await _update_processing_phase(msg, "generate")
-        t0 = time.monotonic()
-        if tool_result:
-            full_response = await _stream_answer_with_tools(
-                msg, simple_rag, actual_question, context_str,
-                chat_history_str, memory_context_str, tool_result,
-            )
-        else:
-            full_response = await _stream_answer(
-                msg, simple_rag, actual_question, context_str,
-                chat_history_str, memory_context_str,
-            )
-        timings["generate"] = time.monotonic() - t0
-
-        # Cache answer for future similar questions
-        asyncio.create_task(simple_rag.cache_answer(actual_question, full_response))
-
-        clean_text, suggested = parse_suggested_buttons(full_response)
-        clean_text = _postprocess_answer_text(clean_text)
-        clean_text = _apply_confirmed_fact_guardrails(clean_text, memory)
-
-        sources_text = docs_to_sources_str(docs)
-        if sources_text:
-            clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
-
-        safe_text = sanitize_telegram_html(clean_text)
-
-        # Combined keyboard: suggested questions + feedback (👍/👎)
-        keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
-        response_delivered = await _safe_edit_message(
-            msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard
-        )
-        if suggested:
-            _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
-
-        # Store Q&A for feedback tracking
-        _store_qa(context, msg.message_id, question, clean_text)
-
-        # 5. Persist conversation + update memory
-        await add_chat_messages(db_session, tg_id, question, clean_text)
-        if db_session_factory:
-            asyncio.create_task(
-                update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
-            )
-
-        timings["total"] = time.monotonic() - pipeline_start
-        logger.info(
-            "[User %s] Pipeline complete (%d docs) | %s",
-            tg_id, len(docs), _fmt_timings(timings),
-        )
-        _emit_observability_metrics(
-            user_id=tg_id,
-            question=question,
-            timings=timings,
-            docs_retrieved=retrieved_count,
-            docs_graded=len(docs),
-            cache_hit=False,
-        )
-        if db_session_factory:
-            asyncio.create_task(add_pipeline_log(
-                db_session_factory, tg_id, question, actual_question,
-                cache_hit=False, docs_retrieved=retrieved_count, docs_after_grading=len(docs),
-                timings=timings, sources=doc_sources,
-            ))
-
-    except Exception as exc:
-        timings["total"] = time.monotonic() - pipeline_start
-        err_str = f"{type(exc).__name__}: {exc}"
-        logger.exception("[User %s] Pipeline error: %s", tg_id, err_str)
-        _emit_observability_metrics(
-            user_id=tg_id,
-            question=question,
-            timings=timings,
-            docs_retrieved=retrieved_count,
-            docs_graded=0,
-            cache_hit=False,
-            error=err_str,
-        )
-        if db_session_factory:
-            asyncio.create_task(add_pipeline_log(
-                db_session_factory, tg_id, question, actual_question,
-                cache_hit=False, docs_retrieved=retrieved_count, docs_after_grading=0,
-                timings=timings, sources=doc_sources, error=err_str,
-            ))
-        # If the user already received the final answer, don't send a second
-        # "processing error" message due to a late side-effect failure.
-        if response_delivered:
-            return
-        raise
-
-
-async def _handle_question_core_v2(
-    context,
-    simple_rag,
-    db_session,
-    chat_id: int,
-    reply_to_id: int,
-    tg_id: int,
-    question: str,
-    onboarding_data: dict,
-    db_session_factory=None,
-    use_hyde: bool = True,
-    use_tools: bool = True,
-    use_reranking: bool = True,
-):
-    """Pipeline-based core path (feature-flagged).
-
-    Keeps Telegram UX/side-effects identical while delegating orchestration
-    to `crag.pipeline`.
-    """
-    pipeline_start = time.monotonic()
-    timings = {}
-    response_delivered = False
-    actual_question = question
-    retrieved_count = 0
-    doc_sources: list = []
-
-    onboarding_data = await _ensure_onboarding_loaded(context, db_session, tg_id)
-    memory, chat_history_str, memory_context_str = await _load_memory(
-        db_session, tg_id, onboarding_data
-    )
-
-    msg = await context.bot.send_message(
-        chat_id=chat_id,
-        reply_to_message_id=reply_to_id,
-        text="🔍 Ищу информацию...",
-    )
-
-    # Track if we've switched to "generate" phase
-    phase_switched = {"generate": False}
-
-    async def _stream_cb(accumulated: str):
-        # Switch to "generate" phase on first content
-        if not phase_switched["generate"]:
-            phase_switched["generate"] = True
-            await _update_processing_phase(msg, "generate")
-
-        answer_regex = re.compile(r'"answer":\s*"((?:[^"\\]|\\.)*)', re.DOTALL)
-        match = answer_regex.search(accumulated)
-        if not match:
-            return
-        display_text = match.group(1)
-        display_text = display_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
-        safe = sanitize_telegram_html(display_text + " ▌")
-        if safe.strip():
-            await _safe_edit_message(msg, safe, parse_mode=ParseMode.HTML)
-
-    try:
-        # Update phase before pipeline starts processing
-        await _update_processing_phase(msg, "analyze")
-
-        pipeline = create_default_pipeline(
-            stream_callback=_stream_cb,
-            use_hyde=use_hyde,
-            use_decomposition=False,
-            use_smart_retrieval=True,
-            use_reranking=use_reranking,
-            use_tools=use_tools,
-            top_k=10,
-            rerank_top_k=6,
-        )
-
-        ctx = PipelineContext(
-            question=question,
-            tg_id=tg_id,
-            onboarding_data=onboarding_data,
-            memory_context=memory_context_str,
-            chat_history=chat_history_str,
-            journey_state=memory.get("journey_state") or {},
-            conversation_summary=memory.get("conversation_summary") or "",
-        )
-
-        ctx = await pipeline.run(ctx, simple_rag)
-        timings = dict(ctx.timings or {})
-        actual_question = ctx.rewritten_question or question
-        docs = ctx.reranked_docs or ctx.graded_docs or ctx.retrieved_docs or []
-        retrieved_count = len(ctx.retrieved_docs or [])
-        doc_sources = [
-            doc.metadata.get("source_url", "")
-            for doc in docs
-            if getattr(doc, "metadata", None) and doc.metadata.get("source_url")
-        ]
-
-        full_response = ctx.answer_json or json.dumps(
-            {
-                "answer": "К сожалению, не удалось сформировать ответ.",
-                "suggested_questions": [],
-            },
-            ensure_ascii=False,
-        )
-        clean_text, suggested = parse_suggested_buttons(full_response)
-        clean_text = _postprocess_answer_text(clean_text)
-        clean_text = _apply_confirmed_fact_guardrails(clean_text, memory)
-
-        sources_text = docs_to_sources_str(docs) if docs else ""
-        if sources_text:
-            clean_text += "\n\nИсточники/наиболее релевантные ссылки:\n" + sources_text
-
-        safe_text = sanitize_telegram_html(clean_text)
-        keyboard = combined_keyboard(suggested, msg.message_id) if suggested else None
-        response_delivered = await _safe_edit_message(
-            msg, safe_text, parse_mode=ParseMode.HTML, reply_markup=keyboard
-        )
-
-        if suggested:
-            _save_suggested(context, db_session_factory, tg_id, suggested, msg_id=msg.message_id)
-        _store_qa(context, msg.message_id, question, clean_text)
-        await add_chat_messages(db_session, tg_id, question, clean_text)
-        if db_session_factory:
-            asyncio.create_task(
-                update_journey_and_summary(simple_rag, db_session_factory, tg_id, question, clean_text)
-            )
-        if not ctx.cache_hit:
-            asyncio.create_task(simple_rag.cache_answer(actual_question, full_response))
-
-        timings["total"] = time.monotonic() - pipeline_start
-        logger.info(
-            "[User %s] Pipeline v2 complete (%d docs) | %s",
-            tg_id, len(docs), _fmt_timings(timings),
-        )
-        _emit_observability_metrics(
-            user_id=tg_id,
-            question=question,
-            timings=timings,
-            docs_retrieved=retrieved_count,
-            docs_graded=len(ctx.graded_docs or []),
-            cache_hit=bool(ctx.cache_hit),
-        )
-        if db_session_factory:
-            asyncio.create_task(add_pipeline_log(
-                db_session_factory, tg_id, question, actual_question,
-                cache_hit=bool(ctx.cache_hit),
-                docs_retrieved=retrieved_count,
-                docs_after_grading=len(ctx.graded_docs or []),
-                timings=timings, sources=doc_sources,
-            ))
-
-    except Exception as exc:
-        timings["total"] = time.monotonic() - pipeline_start
-        err_str = f"{type(exc).__name__}: {exc}"
-        logger.exception("[User %s] Pipeline v2 error: %s", tg_id, err_str)
-        _emit_observability_metrics(
-            user_id=tg_id,
-            question=question,
-            timings=timings,
-            docs_retrieved=retrieved_count,
-            docs_graded=0,
-            cache_hit=False,
-            error=err_str,
-        )
-        if db_session_factory:
-            asyncio.create_task(add_pipeline_log(
-                db_session_factory, tg_id, question, actual_question,
-                cache_hit=False, docs_retrieved=retrieved_count, docs_after_grading=0,
-                timings=timings, sources=doc_sources, error=err_str,
-            ))
-        if response_delivered:
-            return
-        raise
-
-
-async def _run_pipeline_v2_shadow(
-    simple_rag,
-    tg_id: int,
-    question: str,
-    onboarding_data: dict,
-    db_session_factory,
-    use_hyde: bool = True,
-    use_tools: bool = True,
-    use_reranking: bool = True,
-):
-    """Run pipeline v2 in background without affecting user-visible behavior."""
-    if not db_session_factory:
-        return
-
-    start = time.monotonic()
-    try:
-        async with db_session_factory() as session:
-            memory = await get_user_memory(session, tg_id)
-            history_list = await get_context_messages(session, tg_id)
-
-        chat_history_str = _build_chat_history_str(history_list)
-        memory_context_str = build_memory_context(
-            memory.get("journey_state"),
-            memory.get("conversation_summary"),
-            onboarding_data,
-        )
-
-        pipeline = create_default_pipeline(
-            stream_callback=None,
-            use_hyde=use_hyde,
-            use_decomposition=False,
-            use_smart_retrieval=True,
-            use_reranking=use_reranking,
-            use_tools=use_tools,
-            top_k=10,
-            rerank_top_k=6,
-        )
-        ctx = PipelineContext(
-            question=question,
-            tg_id=tg_id,
-            onboarding_data=onboarding_data or {},
-            memory_context=memory_context_str,
-            chat_history=chat_history_str,
-            journey_state=memory.get("journey_state") or {},
-            conversation_summary=memory.get("conversation_summary") or "",
-        )
-        ctx = await pipeline.run(ctx, simple_rag)
-        elapsed = time.monotonic() - start
-        logger.info(
-            "[User %s] Pipeline v2 shadow complete | total=%.2fs | cache=%s | docs=%d",
-            tg_id,
-            elapsed,
-            bool(ctx.cache_hit),
-            len(ctx.reranked_docs or ctx.graded_docs or ctx.retrieved_docs or []),
-        )
-    except Exception as exc:
-        logger.warning(
-            "[User %s] Pipeline v2 shadow failed: %s: %s",
-            tg_id,
-            type(exc).__name__,
-            exc,
-        )
-
-
 async def _handle_question_with_router(
     context,
     simple_rag,
@@ -1148,7 +647,15 @@ async def _handle_question_with_router(
         tool_context_str = "\n\n".join(tool_context_parts)
 
     # Step 5: Handle TOOL_ONLY (no RAG needed)
-    if route.intent == Intent.TOOL_ONLY:
+    # Only personal-progress tools and pure date-math (calculate_days_until) are
+    # allowed to bypass RAG with a raw tool-formatted response. Any other tool
+    # (e.g. calculate_budget showing up defensively) must go through the
+    # LLM+KB pipeline below instead of being raw-dumped.
+    RAW_TOOL_ONLY_TOOLS = {
+        "get_my_progress", "get_next_steps", "get_my_profile",
+        "get_my_entities", "calculate_days_until",
+    }
+    if route.intent == Intent.TOOL_ONLY and set(tool_results.keys()) <= RAW_TOOL_ONLY_TOOLS:
         # Format tool results into readable response
         response_parts = []
 
@@ -1181,7 +688,7 @@ async def _handle_question_with_router(
                         )
                         response_parts.append(f"{i}. {priority_emoji} {step.get('action', step.get('stage', ''))}")
 
-            elif tool_name in ("check_deadline", "calculate_budget", "calculate_days_until"):
+            elif tool_name == "calculate_days_until":
                 # Simple JSON dump for now
                 response_parts.append(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -1331,20 +838,9 @@ async def answer(
         return
 
     try:
-        use_routing = _use_routing_enabled()
-        use_new = _use_new_pipeline_enabled()
-
-        # Priority: routing > new pipeline > legacy
-        if use_routing:
-            handler = _handle_question_with_router
-        elif use_new:
-            handler = _handle_question_core_v2
-        else:
-            handler = _handle_question_core
-
         user_id = update.effective_user.id
         await _handle_question_with_optional_trace(
-            handler(
+            _handle_question_with_router(
                 context=context,
                 simple_rag=simple_rag,
                 db_session=db_session,
@@ -1358,16 +854,6 @@ async def answer(
             tg_id=user_id,
             question=question,
         )
-        if not use_new and _use_pipeline_shadow_enabled():
-            asyncio.create_task(
-                _run_pipeline_v2_shadow(
-                    simple_rag=simple_rag,
-                    tg_id=user_id,
-                    question=question,
-                    onboarding_data=dict(context.user_data.get("onboarding", {})),
-                    db_session_factory=kwargs.get("db_session_factory"),
-                )
-            )
     except Exception:
         logger.exception("Error in answer handler")
         await context.bot.send_message(
@@ -1396,11 +882,9 @@ async def answer_to_replied(
         return
 
     try:
-        use_new = _use_new_pipeline_enabled()
-        handler = _handle_question_core_v2 if use_new else _handle_question_core
         user_id = update.effective_user.id
         await _handle_question_with_optional_trace(
-            handler(
+            _handle_question_with_router(
                 context=context,
                 simple_rag=simple_rag,
                 db_session=db_session,
@@ -1414,16 +898,6 @@ async def answer_to_replied(
             tg_id=user_id,
             question=question,
         )
-        if not use_new and _use_pipeline_shadow_enabled():
-            asyncio.create_task(
-                _run_pipeline_v2_shadow(
-                    simple_rag=simple_rag,
-                    tg_id=user_id,
-                    question=question,
-                    onboarding_data=dict(context.user_data.get("onboarding", {})),
-                    db_session_factory=kwargs.get("db_session_factory"),
-                )
-            )
     except Exception:
         logger.exception("Error in answer_to_replied handler")
         await context.bot.send_message(

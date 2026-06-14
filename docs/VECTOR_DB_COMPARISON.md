@@ -6,7 +6,7 @@
 - Unified storage (users, chat, vectors in one DB)
 - Hybrid search (vector + FTS) out of the box
 - JSONB metadata filtering with GIN indexes
-- Simple Railway deployment (one service)
+- Simple Docker Compose deployment (one extra service: `pgvector/pgvector:pg16`)
 - Cost: $0 extra (included in PostgreSQL)
 - Retrieval: ~0.4s for 600 chunks
 
@@ -29,7 +29,7 @@
 - Multi-tenancy support
 
 **Cons:**
-- Additional service to manage (Railway or separate host)
+- Additional service to manage (extra container or separate host)
 - Cost: Free (self-hosted) or $25-50/mo (cloud)
 - Need to sync metadata (users, chat) separately with PostgreSQL
 - Migration effort: rewrite indexing + retrieval code
@@ -174,7 +174,7 @@ async def aretrieve(self, query: str, top_k: int = 6, user_filters: dict = None)
 ```
 
 **Effort:** ~1-2 days
-**Cost:** +$0 (self-hosted on Railway) or +$25/mo (Qdrant Cloud)
+**Cost:** +$0 (self-hosted alongside the existing Docker Compose stack) or +$25/mo (Qdrant Cloud)
 
 ---
 

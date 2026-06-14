@@ -97,11 +97,21 @@ class BaseLLMProvider:
     def __init__(self, config: LLMConfig):
         self.config = config
 
-    async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+    ) -> str:
         """Generate text response"""
         raise NotImplementedError
 
-    async def generate_stream(self, prompt: str, system_prompt: Optional[str] = None) -> AsyncIterator[str]:
+    async def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+    ) -> AsyncIterator[str]:
         """Generate streaming text response"""
         raise NotImplementedError
 
@@ -123,13 +133,21 @@ class GoogleLLMProvider(BaseLLMProvider):
         self.types = types
         self.config_obj = config
 
-    async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+    ) -> str:
         """Generate text response"""
         from crag.simple_rag import retry_on_503
 
         config = self.types.GenerateContentConfig(
             system_instruction=system_prompt,
-            temperature=self.config_obj.temperature,
+            temperature=(
+                temperature if temperature is not None
+                else self.config_obj.temperature
+            ),
         )
 
         response = await retry_on_503(
@@ -140,13 +158,21 @@ class GoogleLLMProvider(BaseLLMProvider):
         )
         return response.text or ""
 
-    async def generate_stream(self, prompt: str, system_prompt: Optional[str] = None) -> AsyncIterator[str]:
+    async def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+    ) -> AsyncIterator[str]:
         """Generate streaming text response"""
         from crag.simple_rag import retry_on_503
 
         config = self.types.GenerateContentConfig(
             system_instruction=system_prompt,
-            temperature=self.config_obj.temperature,
+            temperature=(
+                temperature if temperature is not None
+                else self.config_obj.temperature
+            ),
         )
 
         stream = await retry_on_503(
@@ -209,7 +235,12 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         else:
             raise ValueError(f"Unsupported embedding provider: {config.embedding_provider}")
 
-    async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+    ) -> str:
         """Generate text response"""
         messages = []
         if system_prompt:
@@ -219,13 +250,21 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         response = await self.client.chat.completions.create(
             model=self.config.model,
             messages=messages,
-            temperature=self.config.temperature,
+            temperature=(
+                temperature if temperature is not None
+                else self.config.temperature
+            ),
             max_tokens=self.config.max_tokens,
             top_p=self.config.top_p,
         )
         return response.choices[0].message.content
 
-    async def generate_stream(self, prompt: str, system_prompt: Optional[str] = None) -> AsyncIterator[str]:
+    async def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+    ) -> AsyncIterator[str]:
         """Generate streaming text response"""
         messages = []
         if system_prompt:
@@ -235,7 +274,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         stream = await self.client.chat.completions.create(
             model=self.config.model,
             messages=messages,
-            temperature=self.config.temperature,
+            temperature=(
+                temperature if temperature is not None
+                else self.config.temperature
+            ),
             max_tokens=self.config.max_tokens,
             top_p=self.config.top_p,
             stream=True,

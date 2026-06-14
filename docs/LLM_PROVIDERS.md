@@ -80,24 +80,26 @@ OPENAI_BASE_URL=https://api.openai.com/v1  # опционально
 
 ## 🔀 Как переключить провайдера
 
-### На Railway:
-
+Скопируй `.env.example` в `.env` и измени переменные провайдера:
 ```bash
-# Переключиться на NVIDIA
-railway variables set LLM_PROVIDER=nvidia
-railway variables set NVIDIA_API_KEY=nvapi-your-key
-railway variables set OPENAI_MODEL=openai/gpt-oss-120b
-
-# Для эмбеддингов (обязательно при использовании NVIDIA)
-railway variables set GOOGLE_API_KEY=your-google-key
+cp .env.example .env
+nano .env  # или vim, code, etc.
 ```
 
-### Локально:
-
-Скопируй `example.env` в `.env` и измени:
+Например, чтобы переключиться на NVIDIA:
 ```bash
-cp example.env .env
-nano .env  # или vim, code, etc.
+# .env
+LLM_PROVIDER=nvidia
+NVIDIA_API_KEY=nvapi-your-key
+OPENAI_MODEL=openai/gpt-oss-120b
+
+# Для эмбеддингов (обязательно при использовании NVIDIA)
+GOOGLE_API_KEY=your-google-key
+```
+
+После изменения `.env` перезапусти бота:
+```bash
+docker compose up -d --build
 ```
 
 ---

@@ -1,95 +1,83 @@
-# Инструкция по переиндексации после архитектурных изменений
+# Инструкция по переиндексации после изменений в базе знаний
 
-## Что было сделано
+## Когда нужна переиндексация
 
-1. ✅ **Исправлен chunking** — таблицы теперь не режутся, overlap увеличен с 50 до 200 char
-2. ✅ **Созданы atomic facts** — 4 критичных факта в `knowledge_base/atoms/`:
-   - `vwu-names-by-city.md` — VWU только Вена, VGUH Грац и т.д.
-   - `vwu-lock-trap.md` — нельзя бросить VWU и сдать внешний C1
-   - `tu-wien-c1-requirement.md` — TU Wien требует C1, а не B2
-   - `path-from-a2-to-admission.md` — путь поступления с A2
-3. ✅ **Удален дубликат** — `low-german-level-path.md` (заменен на atomic facts)
-4. ✅ **Увеличен top_k** — с 6 до 10 для лучшего retrieval
-5. ✅ **Добавлена валидация** — bot не выдаст троеточие вместо ответа
+Переиндексация требуется после любых изменений в:
+- `facts/` — структурированные YAML-факты (университеты, языковые требования, финансы)
+- markdown-документах в `knowledge_base/` (нарративные гайды), если такая директория присутствует в проекте
 
-## Как переиндексировать на Railway
+а также при смене embedding-провайдера или модели (см. `docs/REINDEX_KB.md`).
 
-### Вариант 1: Триггер через переменную окружения (рекомендуется)
+## Как переиндексировать (Docker Compose)
+
+### Вариант 1: Принудительная переиндексация при запуске контейнера
 
 ```bash
-# Установи Railway CLI (если еще не установлен)
-brew install railway
+# В .env (или переменных окружения перед docker compose up)
+export FORCE_REINDEX=true
 
-# Войди в проект
-railway link
-
-# Триггер переиндексации
-railway variables set REINDEX_TRIGGER=$(date +%s)
+docker compose up -d --build
 ```
 
-Это автоматически запустит redeploy → indexing script запустится → база обновится.
+`init_scripts/entry.sh` запускает индексацию автоматически при каждом старте контейнера бота:
+```bash
+python3 init_scripts/init_bot_db.py
+python3 -m bot.migrate
+python3 init_scripts/index_knowledge_base.py
+python3 bot/app.py
+```
 
-### Вариант 2: Через UI Railway
+При `FORCE_REINDEX=true` индексация выполняется полностью, независимо от того, изменился ли хэш файлов в `facts/`.
 
-1. Зайди на railway.app
-2. Открой свой проект
-3. Зайди в Variables
-4. Добавь новую переменную `REINDEX_TRIGGER` со значением `1`
-5. Сохрани → автоматический redeploy
-6. После успешной переиндексации удали эту переменную
+После успешной переиндексации не забудьте убрать `FORCE_REINDEX` из `.env`, чтобы не пересчитывать эмбеддинги при каждом перезапуске.
 
-### Вариант 3: Force reindex
+### Вариант 2: Запустить скрипт индексации вручную (внутри контейнера)
 
 ```bash
-railway variables set FORCE_REINDEX=true
-railway up --detach
+docker compose exec freshmanragbot python3 -m init_scripts.index_knowledge_base
 ```
 
-После успешной переиндексации:
+### Вариант 3: Локально (без Docker)
+
 ```bash
-railway variables delete FORCE_REINDEX
+export FORCE_REINDEX=true
+python3 -m init_scripts.index_knowledge_base
 ```
+
+Требует настроенных переменных окружения для подключения к БД (`POSTGRES_*`) и выбранного LLM/embedding-провайдера (`LLM_PROVIDER`, `GOOGLE_API_KEY` и т.д.).
 
 ## Проверка успешности
 
-После деплоя проверь логи:
+После переиндексации проверьте логи бота:
 
 ```bash
-railway logs
+docker compose logs -f freshmanragbot
 ```
 
-Должно быть:
+Ожидаемый вывод включает что-то вроде:
 ```
-✅ Embedding provider: nvidia, dimensions: 1536
-Loaded 450 chunks total. Generating embeddings...
-📄 vwu-names-by-city.md: 1 chunks
-📄 vwu-lock-trap.md: 1 chunks
-📄 tu-wien-c1-requirement.md: 1 chunks
-📄 path-from-a2-to-admission.md: 1 chunks
-Successfully indexed knowledge base. 450 chunks added.
+Embedding provider: google, dimensions: 3072
+Loaded N chunks total. Generating embeddings...
+Successfully indexed knowledge base. N chunks added.
 ```
 
-## Ожидаемые улучшения
+## Что индексируется
 
-После переиндексации:
-- ✅ Бот найдет факты про VWU/VGUH при вопросах о низком уровне языка
-- ✅ Не будет путать VWU (Вена) с курсами в других городах
-- ✅ Таблицы в ответах будут целыми
-- ✅ Не будет показывать "..." вместо ответа
-- ✅ Лучший retrieval благодаря увеличенному top_k
+- `facts/universities/*.yaml`, `facts/language/*.yaml`, `facts/financial/*.yaml` — через `crag/yaml_facts_indexer.py` (основной источник в текущем репозитории)
+- Markdown-гайды в `knowledge_base/` (если эта директория присутствует) — через `init_scripts/index_knowledge_base.py`. В текущем репозитории такой директории нет, поэтому индексируются только YAML-факты из `facts/`.
+
+Все чанки сохраняются в таблицу `simple_documents` (pgvector) с embedding'ами, сгенерированными выбранным провайдером.
 
 ## Если что-то пошло не так
 
-Если после переиндексации бот работает хуже:
-1. Проверь логи: `railway logs`
-2. Убедись что indexing завершился успешно (см. "Successfully indexed")
-3. Если embeddings provider поменялся — это нормально, просто занимает 2-3 минуты
+1. Проверьте логи: `docker compose logs -f freshmanragbot`
+2. Убедитесь, что индексация завершилась успешно (см. "Successfully indexed")
+3. Если embedding-провайдер изменился — таблица `simple_documents` будет пересоздана автоматически (см. `docs/REINDEX_KB.md`)
 
 ## Rollback (если нужно)
 
-Если хочешь вернуться к старой версии:
+Если хочешь вернуться к старой версии кода:
 ```bash
 git revert HEAD
-git push
+docker compose up -d --build
 ```
-Railway автоматически задеплоит предыдущую версию.
