@@ -13,9 +13,37 @@ Tools are categorized into:
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
 from typing import Callable, Any, Optional, List
 
+import yaml
+
 logger = logging.getLogger(__name__)
+
+
+# Path to the cost-of-living YAML, resolved relative to this file's location
+# (crag/tools.py -> repo root is the parent directory).
+COST_OF_LIVING_PATH = Path(__file__).resolve().parent.parent / "facts" / "financial" / "cost-of-living.yaml"
+
+
+@lru_cache(maxsize=1)
+def _load_cost_of_living() -> Optional[dict]:
+    """Load and cache the cost-of-living data from the facts YAML.
+
+    Returns:
+        Parsed YAML data as a dict, or None if the file is missing/invalid.
+    """
+    try:
+        with open(COST_OF_LIVING_PATH, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        return data
+    except FileNotFoundError:
+        logger.error(f"Cost-of-living data file not found: {COST_OF_LIVING_PATH}")
+        return None
+    except yaml.YAMLError as e:
+        logger.error(f"Failed to parse cost-of-living YAML: {e}")
+        return None
 
 
 @dataclass
@@ -28,130 +56,6 @@ class Tool:
 
 
 # ── Tool Implementations ─────────────────────────────────────────────────
-
-
-async def check_deadline(
-    university: str,
-    level: str,
-    semester: str = "ws"
-) -> dict:
-    """Check admission deadlines for a specific university.
-
-    Args:
-        university: University name (e.g., "Uni Wien", "TU Wien")
-        level: Study level ("bachelor", "master", "phd")
-        semester: Target semester ("ws" for winter, "ss" for summer)
-
-    Returns:
-        Dictionary with deadline info or error message
-    """
-    # Normalize inputs
-    uni_key = university.lower().replace(" ", "_").replace("-", "_")
-    level_key = level.lower()
-    sem_key = semester.lower()
-
-    # Deadline database (to be expanded or moved to KB/DB)
-    DEADLINES = {
-        # Uni Wien
-        ("uni_wien", "bachelor", "ws"): {
-            "deadline": "2026-09-05",
-            "non_eu_early": "2026-02-01",
-            "note": "Для Non-EU: подача через u:space до 5 сентября",
-        },
-        ("uni_wien", "bachelor", "ss"): {
-            "deadline": "2026-02-05",
-            "non_eu_early": "2025-10-01",
-        },
-        ("uni_wien", "master", "ws"): {
-            "deadline": "2026-09-05",
-            "non_eu_early": "2026-02-01",
-        },
-        ("uni_wien", "master", "ss"): {
-            "deadline": "2026-02-05",
-        },
-        # TU Wien
-        ("tu_wien", "bachelor", "ws"): {
-            "deadline": "2026-09-05",
-            "non_eu_early": "2026-03-31",
-            "note": "Для технических направлений — вступительные экзамены в июне",
-        },
-        ("tu_wien", "master", "ws"): {
-            "deadline": "2026-09-05",
-        },
-        # WU Wien
-        ("wu_wien", "bachelor", "ws"): {
-            "deadline": "2026-05-31",
-            "note": "Aufnahmeverfahren обязателен",
-        },
-        # Uni Graz
-        ("uni_graz", "bachelor", "ws"): {
-            "deadline": "2026-09-05",
-            "non_eu_early": "2026-07-15",
-        },
-        ("uni_graz", "master", "ws"): {
-            "deadline": "2026-09-05",
-        },
-        # Uni Innsbruck
-        ("uni_innsbruck", "bachelor", "ws"): {
-            "deadline": "2026-05-15",
-            "note": "Ранний дедлайн для популярных программ",
-        },
-        # TU Graz
-        ("tu_graz", "bachelor", "ws"): {
-            "deadline": "2026-09-05",
-        },
-        # JKU Linz
-        ("jku_linz", "bachelor", "ws"): {
-            "deadline": "2026-09-05",
-        },
-        # MedUni Wien (special)
-        ("meduni_wien", "bachelor", "ws"): {
-            "deadline": "2026-03-31",
-            "note": "MedAT экзамен в июле. Регистрация до 31 марта!",
-        },
-    }
-
-    key = (uni_key, level_key, sem_key)
-    data = DEADLINES.get(key)
-
-    if not data:
-        # Try partial match
-        for (u, l, s), d in DEADLINES.items():
-            if uni_key in u or u in uni_key:
-                if l == level_key and s == sem_key:
-                    data = d
-                    break
-
-    if data:
-        deadline_date = datetime.strptime(data["deadline"], "%Y-%m-%d")
-        days_left = (deadline_date - datetime.now()).days
-
-        result = {
-            "university": university,
-            "level": level,
-            "semester": "Зимний семестр" if sem_key == "ws" else "Летний семестр",
-            "deadline": data["deadline"],
-            "days_left": days_left,
-            "status": "прошёл" if days_left < 0 else (
-                "СРОЧНО!" if days_left < 30 else "открыт"
-            ),
-        }
-
-        if data.get("non_eu_early"):
-            early_date = datetime.strptime(data["non_eu_early"], "%Y-%m-%d")
-            early_days = (early_date - datetime.now()).days
-            result["non_eu_early_deadline"] = data["non_eu_early"]
-            result["non_eu_early_days_left"] = early_days
-
-        if data.get("note"):
-            result["note"] = data["note"]
-
-        return result
-
-    return {
-        "error": f"Дедлайн для {university} ({level}, {semester}) не найден в базе",
-        "suggestion": "Уточните название вуза или проверьте официальный сайт",
-    }
 
 
 async def calculate_budget(
@@ -169,51 +73,14 @@ async def calculate_budget(
     Returns:
         Dictionary with budget breakdown
     """
-    # Monthly costs by city (in EUR)
-    COSTS = {
-        "vienna": {
-            "rent": 600,      # WG/Studentenheim
-            "food": 300,
-            "transport": 50,  # Semesterticket
-            "misc": 150,
-            "insurance": 65,
-        },
-        "wien": {
-            "rent": 600,
-            "food": 300,
-            "transport": 50,
-            "misc": 150,
-            "insurance": 65,
-        },
-        "graz": {
-            "rent": 450,
-            "food": 280,
-            "transport": 40,
-            "misc": 120,
-            "insurance": 65,
-        },
-        "innsbruck": {
-            "rent": 550,
-            "food": 290,
-            "transport": 45,
-            "misc": 130,
-            "insurance": 65,
-        },
-        "linz": {
-            "rent": 480,
-            "food": 280,
-            "transport": 40,
-            "misc": 120,
-            "insurance": 65,
-        },
-        "salzburg": {
-            "rent": 550,
-            "food": 290,
-            "transport": 45,
-            "misc": 130,
-            "insurance": 65,
-        },
-    }
+    data = _load_cost_of_living()
+
+    if not data:
+        return {
+            "error": "Данные о стоимости жизни не найдены (facts/financial/cost-of-living.yaml)",
+        }
+
+    costs = data.get("cities", {})
 
     multipliers = {
         "low": 0.75,
@@ -225,13 +92,13 @@ async def calculate_budget(
     city_lower = city_lower.replace("инсбрук", "innsbruck").replace("линц", "linz")
     city_lower = city_lower.replace("зальцбург", "salzburg")
 
-    if city_lower not in COSTS:
+    if city_lower not in costs:
         return {
             "error": f"Город '{city}' не найден",
             "available_cities": ["Vienna", "Graz", "Innsbruck", "Linz", "Salzburg"],
         }
 
-    base = COSTS[city_lower]
+    base = costs[city_lower]
     mult = multipliers.get(lifestyle.lower(), 1.0)
 
     breakdown = {k: round(v * mult) for k, v in base.items()}
@@ -247,184 +114,7 @@ async def calculate_budget(
         "breakdown": breakdown,
         "blocked_account_required": yearly_total,
         "blocked_account_note": f"Для ВНЖ нужен блокированный счёт на €{yearly_total} (12 месяцев)",
-        "tips": [
-            "Studentenheim дешевле, чем WG — подавайте заявку заранее",
-            "Semesterticket даёт скидку на транспорт",
-            "Mensa (студенческая столовая) — обед от €5-7",
-        ],
-    }
-
-
-async def get_document_checklist(
-    target_level: str,
-    country: str = "RU",
-    has_german_cert: bool = False,
-    university: Optional[str] = None
-) -> dict:
-    """Generate personalized document checklist.
-
-    Args:
-        target_level: Study level ("bachelor", "master", "phd")
-        country: Country of origin code (RU, UA, BY, KZ)
-        has_german_cert: Whether user already has German certificate
-        university: Target university (optional, for specific requirements)
-
-    Returns:
-        Dictionary with checklist items
-    """
-    # Base documents for all
-    checklist = [
-        {
-            "doc": "Загранпаспорт",
-            "status": "required",
-            "note": "Действителен минимум 6 месяцев после подачи на визу",
-        },
-        {
-            "doc": "Фотография 3.5x4.5 см",
-            "status": "required",
-            "note": "Биометрическое фото, белый фон",
-        },
-    ]
-
-    # Education documents based on level
-    if target_level.lower() == "bachelor":
-        checklist.extend([
-            {
-                "doc": "Аттестат о среднем образовании",
-                "status": "required",
-                "note": "Оригинал + нотариально заверенная копия",
-            },
-            {
-                "doc": "Апостиль на аттестат",
-                "status": "required",
-                "note": "Получить в Минобрнауки или МИД",
-            },
-            {
-                "doc": "Приложение к аттестату с оценками",
-                "status": "required",
-                "note": "С апостилем",
-            },
-            {
-                "doc": "Присяжный перевод аттестата на немецкий",
-                "status": "required",
-                "note": "Только сертифицированный переводчик (beglaubigte Übersetzung)",
-            },
-            {
-                "doc": "Studienplatznachweis (для Non-EU)",
-                "status": "required",
-                "note": "Подтверждение права на обучение в стране происхождения",
-            },
-        ])
-    elif target_level.lower() == "master":
-        checklist.extend([
-            {
-                "doc": "Диплом бакалавра",
-                "status": "required",
-                "note": "Оригинал + нотариальная копия",
-            },
-            {
-                "doc": "Апостиль на диплом",
-                "status": "required",
-            },
-            {
-                "doc": "Приложение к диплому (Transcript)",
-                "status": "required",
-                "note": "С указанием часов и оценок",
-            },
-            {
-                "doc": "Присяжный перевод диплома",
-                "status": "required",
-            },
-            {
-                "doc": "Мотивационное письмо",
-                "status": "recommended",
-                "note": "Для многих Master-программ",
-            },
-            {
-                "doc": "CV/Резюме",
-                "status": "recommended",
-            },
-        ])
-    elif target_level.lower() == "phd":
-        checklist.extend([
-            {
-                "doc": "Диплом магистра",
-                "status": "required",
-            },
-            {
-                "doc": "Апостиль на диплом магистра",
-                "status": "required",
-            },
-            {
-                "doc": "Research proposal",
-                "status": "required",
-                "note": "План исследования на 3-5 страниц",
-            },
-            {
-                "doc": "Рекомендательные письма (2-3)",
-                "status": "required",
-            },
-        ])
-
-    # Language certificate
-    if not has_german_cert:
-        checklist.append({
-            "doc": "Сертификат немецкого языка (B2/C1)",
-            "status": "pending",
-            "note": "ÖSD, Goethe, TestDaF, DSH. Для поступления обычно B2, некоторые программы C1",
-        })
-    else:
-        checklist.append({
-            "doc": "Сертификат немецкого языка",
-            "status": "completed",
-        })
-
-    # Visa/ВНЖ documents
-    checklist.extend([
-        {
-            "doc": "Подтверждение финансов (блокированный счёт)",
-            "status": "required",
-            "note": f"~€12,000-14,000 на год (Sperrkonto или Verpflichtungserklärung)",
-        },
-        {
-            "doc": "Медицинская страховка",
-            "status": "required",
-            "note": "ÖGK после регистрации или частная на первое время",
-        },
-        {
-            "doc": "Справка о несудимости",
-            "status": "required",
-            "note": "С апостилем, переведённая",
-        },
-        {
-            "doc": "Zulassungsbescheid (письмо о зачислении)",
-            "status": "required",
-            "note": "Получите после подачи документов в вуз",
-        },
-    ])
-
-    # Country-specific notes
-    country_notes = {
-        "RU": "Апостиль: Минобрнауки (диплом/аттестат) или МИД (другие документы)",
-        "UA": "Упрощённый режим для граждан Украины — уточните в посольстве",
-        "BY": "Апостиль в Минюсте Беларуси",
-        "KZ": "Апостиль в Минюсте Казахстана",
-    }
-
-    return {
-        "level": target_level,
-        "country": country,
-        "checklist": checklist,
-        "total_documents": len(checklist),
-        "required_count": len([c for c in checklist if c["status"] == "required"]),
-        "pending_count": len([c for c in checklist if c["status"] == "pending"]),
-        "country_note": country_notes.get(country.upper(), ""),
-        "general_tips": [
-            "Все переводы должны быть присяжными (beglaubigte Übersetzung)",
-            "Апостиль ставится на ОРИГИНАЛ документа",
-            "Делайте нотариальные копии ПОСЛЕ апостилирования",
-            "Сохраняйте электронные копии всех документов",
-        ],
+        "tips": data.get("tips", []),
     }
 
 
@@ -728,32 +418,6 @@ PERSONAL_TOOLS = {"get_my_progress", "get_next_steps", "get_my_profile", "get_my
 TOOLS = [
     # ── Calculator Tools (no DB access needed) ──
     Tool(
-        name="check_deadline",
-        description="Проверяет дедлайны подачи документов для конкретного вуза и уровня обучения. Используй когда пользователь спрашивает о сроках подачи.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "university": {
-                    "type": "string",
-                    "description": "Название вуза (например, 'Uni Wien', 'TU Wien', 'WU Wien')",
-                },
-                "level": {
-                    "type": "string",
-                    "enum": ["bachelor", "master", "phd"],
-                    "description": "Уровень обучения",
-                },
-                "semester": {
-                    "type": "string",
-                    "enum": ["ws", "ss"],
-                    "description": "Семестр: ws (зимний) или ss (летний). По умолчанию ws.",
-                    "default": "ws",
-                },
-            },
-            "required": ["university", "level"],
-        },
-        function=check_deadline,
-    ),
-    Tool(
         name="calculate_budget",
         description="Рассчитывает примерный бюджет на обучение и проживание в Австрии. Используй когда пользователь спрашивает о стоимости, расходах, бюджете.",
         parameters={
@@ -793,36 +457,6 @@ TOOLS = [
             "required": ["target_date"],
         },
         function=calculate_days_until,
-    ),
-    Tool(
-        name="get_document_checklist",
-        description="Генерирует общий чек-лист документов для поступления по уровню и стране. Используй когда пользователь спрашивает какие документы нужны без уточнения своего прогресса.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "target_level": {
-                    "type": "string",
-                    "enum": ["bachelor", "master", "phd"],
-                    "description": "Уровень обучения",
-                },
-                "country": {
-                    "type": "string",
-                    "description": "Код страны происхождения (RU, UA, BY, KZ)",
-                    "default": "RU",
-                },
-                "has_german_cert": {
-                    "type": "boolean",
-                    "description": "Есть ли уже сертификат немецкого языка",
-                    "default": False,
-                },
-                "university": {
-                    "type": "string",
-                    "description": "Целевой вуз (опционально)",
-                },
-            },
-            "required": ["target_level"],
-        },
-        function=get_document_checklist,
     ),
 
     # ── Personal Progress Tools (require tg_id injection) ──

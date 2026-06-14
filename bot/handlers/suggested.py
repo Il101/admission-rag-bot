@@ -7,9 +7,7 @@ from telegram.ext import ContextTypes
 from bot.decorators import filter_banned, with_db_session
 from bot.db import get_user_memory
 from bot.handlers.rag import (
-    _handle_question_core,
-    _handle_question_core_v2,
-    _use_new_pipeline_enabled,
+    _handle_question_with_router,
     parse_suggested_buttons,
 )
 
@@ -77,8 +75,7 @@ def build_suggested_handler(simple_rag, db_session):
                 text=f"❓ {question}",
             )
 
-            handler = _handle_question_core_v2 if _use_new_pipeline_enabled() else _handle_question_core
-            await handler(
+            await _handle_question_with_router(
                 context=context,
                 simple_rag=simple_rag,
                 db_session=db_session,

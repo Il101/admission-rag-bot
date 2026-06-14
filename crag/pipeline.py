@@ -121,6 +121,10 @@ class PipelineContext:
     reranked_docs: List[Any] = field(default_factory=list)
     context_str: str = ""
 
+    # Query classification / user scoping (used for cache gating + keying)
+    query_type: Optional[Any] = None
+    user_filters: dict = field(default_factory=dict)
+
     # Tools
     tool_needed: Optional[dict] = None
     tool_result: Optional[dict] = None
@@ -184,13 +188,27 @@ class CacheStep(PipelineStep):
     name = "cache"
 
     async def execute(self, ctx: PipelineContext, rag: Any) -> None:
+        # Classify the query and resolve user filters once, so both the
+        # cache lookup here and the cache store later (CacheStoreStep) and
+        # retrieval can stay consistent.
+        from crag.query_router import classify_query
+
+        if ctx.query_type is None:
+            ctx.query_type = classify_query(ctx.rewritten_question).query_type
+        if not ctx.user_filters:
+            ctx.user_filters = RetrieveStep._build_user_filters(ctx.onboarding_data)
+
         # If a tool call is required, skip semantic cache to avoid
         # returning a stale answer that doesn't include tool output.
         if ctx.tool_needed:
             return
 
         t0 = time.monotonic()
-        cached = await rag.get_cached_answer(ctx.rewritten_question)
+        cached = await rag.get_cached_answer(
+            ctx.rewritten_question,
+            query_type=ctx.query_type,
+            user_filters=ctx.user_filters,
+        )
         ctx.timings["cache_check"] = time.monotonic() - t0
 
         if cached:
@@ -553,9 +571,16 @@ class CacheStoreStep(PipelineStep):
 
     async def execute(self, ctx: PipelineContext, rag: Any) -> None:
         if not ctx.cache_hit and ctx.answer_json:
-            # Fire and forget
+            # Fire and forget. query_type/user_filters were resolved in
+            # CacheStep; rag.cache_answer skips storage for FACT queries
+            # and scopes the cache key by user_filters otherwise.
             asyncio.create_task(
-                rag.cache_answer(ctx.rewritten_question, ctx.answer_json)
+                rag.cache_answer(
+                    ctx.rewritten_question,
+                    ctx.answer_json,
+                    query_type=ctx.query_type,
+                    user_filters=ctx.user_filters,
+                )
             )
 
 
